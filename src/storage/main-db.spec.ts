@@ -1,8 +1,7 @@
-import { afterEach, describe, expect, it } from 'bun:test'
 import { rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { Database } from 'bun:sqlite'
+import { afterEach, describe, expect, it } from 'bun:test'
 import { closeMainDb, openMainDb } from './main-db'
 
 const TEST_DB_PATH = join(tmpdir(), `test-main-db-${Date.now()}.db`)
@@ -50,7 +49,7 @@ describe('openMainDb', () => {
   it('應具有冪等性：呼叫兩次不報錯', () => {
     const { sqlite: sqlite1 } = openMainDb(TEST_DB_PATH)
     closeMainDb(sqlite1)
-    
+
     const { sqlite: sqlite2 } = openMainDb(TEST_DB_PATH)
     expect(sqlite2).toBeDefined()
     closeMainDb(sqlite2)
@@ -58,7 +57,7 @@ describe('openMainDb', () => {
 
   it('pending_triggers table 應有正確的欄位和索引', () => {
     const { sqlite } = openMainDb(TEST_DB_PATH)
-    
+
     // 檢查欄位
     const columns = sqlite.query(`PRAGMA table_info(pending_triggers)`).all() as Array<{
       name: string
@@ -67,7 +66,7 @@ describe('openMainDb', () => {
       dflt_value: string | null
       pk: number
     }>
-    
+
     const columnNames = columns.map(c => c.name)
     expect(columnNames).toContain('group_id')
     expect(columnNames).toContain('platform')
@@ -76,16 +75,16 @@ describe('openMainDb', () => {
     expect(columnNames).toContain('status')
     expect(columnNames).toContain('created_at')
     expect(columnNames).toContain('updated_at')
-    
+
     // 檢查索引
     const indexes = sqlite.query(`
       SELECT name FROM sqlite_master 
       WHERE type='index' AND tbl_name='pending_triggers'
     `).all() as Array<{ name: string }>
-    
+
     const indexNames = indexes.map(i => i.name)
     expect(indexNames).toContain('idx_triggers_status_trigger')
-    
+
     closeMainDb(sqlite)
   })
 })
@@ -99,7 +98,7 @@ describe('closeMainDb', () => {
   it('關閉後 query 應拋出錯誤', () => {
     const { sqlite } = openMainDb(TEST_DB_PATH)
     closeMainDb(sqlite)
-    
+
     expect(() => {
       sqlite.query('SELECT 1').get()
     }).toThrow()

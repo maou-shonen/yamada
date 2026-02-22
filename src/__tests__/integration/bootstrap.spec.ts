@@ -1,9 +1,9 @@
 import type { Scheduler, SchedulerDeps } from '../../scheduler/index'
 import type { PlatformChannel, UnifiedMessage } from '../../types'
-import { afterEach, describe, expect, mock, test } from 'bun:test'
 import { existsSync, mkdirSync, rmSync } from 'node:fs'
 import path from 'node:path'
 import { Database } from 'bun:sqlite'
+import { afterEach, describe, expect, mock, test } from 'bun:test'
 import { bootstrap } from '../../bootstrap'
 import { createTestConfig } from '../helpers/config'
 

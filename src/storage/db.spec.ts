@@ -1,9 +1,9 @@
-import { afterEach, describe, expect, test } from 'bun:test'
 import { rmSync } from 'node:fs'
-import { messages } from './schema'
+import { afterEach, describe, expect, test } from 'bun:test'
 import { GroupDbManager, openGroupDb } from './db'
+import { messages } from './schema'
 
-const TEST_DB_DIR = '/tmp/test-db-' + Date.now()
+const TEST_DB_DIR = `/tmp/test-db-${Date.now()}`
 
 afterEach(() => {
   try {

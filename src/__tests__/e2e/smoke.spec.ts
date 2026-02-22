@@ -78,8 +78,6 @@ describe('E2E 冒煙測試', () => {
       .all() as { name: string }[]
     expect(vtables.length).toBeGreaterThan(0)
 
-
-
     sqlite.close()
   })
 

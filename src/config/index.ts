@@ -88,8 +88,8 @@ const configSchema = z.object({
   DELIVERY_LINE_MAX_LENGTH: z.coerce.number().int().positive().default(5000),
   /** 私訊（DM）時的自動回覆文字 */
   DELIVERY_DM_REPLY_TEXT: z.string().default('暫不支援私訊功能'),
-  /** LINE replyToken 快取有效時間（ms）；過期後 fallback 到 pushMessage */
-  DELIVERY_REPLY_TOKEN_FRESHNESS_MS: z.coerce.number().int().positive().default(30000),
+  /** LINE replyToken 快取有效時間（ms）；實際 TTL ~60s，預設 50s 為安全邊際。過期後 fallback 到 pushMessage */
+  DELIVERY_REPLY_TOKEN_FRESHNESS_MS: z.coerce.number().int().positive().default(50000),
 
   // ── Bot 身份 — 儲存 bot 訊息時使用的識別資料 ──
 

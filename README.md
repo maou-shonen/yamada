@@ -128,12 +128,12 @@ bun run src/index.ts
 
 ### Delivery — 訊息投遞與平台限制
 
-| 變數                                | 預設值             | 說明                               |
-| ----------------------------------- | ------------------ | ---------------------------------- |
-| `DELIVERY_DISCORD_MAX_LENGTH`       | `2000`             | Discord 單則訊息字元上限           |
-| `DELIVERY_LINE_MAX_LENGTH`          | `5000`             | LINE 單則訊息字元上限              |
-| `DELIVERY_DM_REPLY_TEXT`            | `暫不支援私訊功能` | 私訊時的自動回覆文字               |
-| `DELIVERY_REPLY_TOKEN_FRESHNESS_MS` | `30000`            | LINE replyToken 快取有效時間（ms） |
+| 變數                                | 預設值             | 說明                                                               |
+| ----------------------------------- | ------------------ | ------------------------------------------------------------------ |
+| `DELIVERY_DISCORD_MAX_LENGTH`       | `2000`             | Discord 單則訊息字元上限                                           |
+| `DELIVERY_LINE_MAX_LENGTH`          | `5000`             | LINE 單則訊息字元上限                                              |
+| `DELIVERY_DM_REPLY_TEXT`            | `暫不支援私訊功能` | 私訊時的自動回覆文字                                               |
+| `DELIVERY_REPLY_TOKEN_FRESHNESS_MS` | `50000`            | LINE replyToken 有效時間（ms）；實際 TTL ~60s，預設 50s 為安全邊際 |
 
 ### Bot 身份
 

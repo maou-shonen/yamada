@@ -3,6 +3,7 @@ import type { PlatformChannel, UnifiedMessage } from '../types.ts'
 import { messagingApi, validateSignature } from '@line/bot-sdk'
 import { log } from '../logger'
 import { truncateText } from '../utils/text.ts'
+import { ReplyTokenPool } from './reply-token-pool.ts'
 
 const lineLog = log.withPrefix('[LINE]')
 
@@ -34,11 +35,6 @@ interface LineWebhookBody {
   events?: LineMessageEvent[]
 }
 
-interface ReplyTokenEntry {
-  token: string
-  cachedAt: number
-}
-
 const MESSAGE_TYPE_LABELS: Record<string, string> = {
   image: '[圖片]',
   sticker: '[貼圖]',
@@ -52,12 +48,17 @@ const MESSAGE_TYPE_LABELS: Record<string, string> = {
  * LINE 平台通道
  *
  * WHY reply/push 雙策略：
- * - replyMessage：免費，但 replyToken 只有 ~30 秒有效期，且只能用一次。
+ * - replyMessage：免費，但 replyToken 有 ~60 秒有效期，且只能用一次。
  * - pushMessage：隨時可用，但消耗 push 配額（有成本）。
  *
  * 我們優先使用 replyMessage（最大化免費額度），
  * 若 token 過期或失敗則 fallback 到 pushMessage（保證可靠性）。
- * 這個策略在成本與可靠性之間取得平衡。
+ * 此策略在成本與可靠性之間取得平衡。
+ *
+ * Token 管理由 ReplyTokenPool 負責：
+ * - 每個 webhook 事件到達時呼叫 pool.store() 存放 token
+ * - sendMessage 呼叫 pool.claim() 取出最舊的有效 token（FIFO）
+ * - pool 自動處理過期判斷與移除，channel 無需手動管理
  */
 export class LineChannel implements PlatformChannel {
   readonly name = 'line'
@@ -69,15 +70,16 @@ export class LineChannel implements PlatformChannel {
   private readonly lineChannelAccessToken: string
   private readonly lineChannelSecret: string
 
-  private replyTokenCache: Map<string, ReplyTokenEntry> = new Map()
+  private pool: ReplyTokenPool
 
-  constructor(config: Config) {
+  constructor(config: Config, options?: { pool?: ReplyTokenPool }) {
     if (!config.LINE_CHANNEL_ACCESS_TOKEN || !config.LINE_CHANNEL_SECRET) {
       throw new Error('LineChannel 需要 LINE 憑證（LINE_CHANNEL_ACCESS_TOKEN / LINE_CHANNEL_SECRET）')
     }
     this.config = config
     this.lineChannelAccessToken = config.LINE_CHANNEL_ACCESS_TOKEN
     this.lineChannelSecret = config.LINE_CHANNEL_SECRET
+    this.pool = options?.pool ?? new ReplyTokenPool(config.DELIVERY_REPLY_TOKEN_FRESHNESS_MS)
   }
 
   async start(): Promise<void> {
@@ -100,7 +102,7 @@ export class LineChannel implements PlatformChannel {
       lineLog.info('Webhook server stopped')
     }
     this.client = null
-    this.replyTokenCache.clear()
+    this.pool.clear()
   }
 
   /**
@@ -108,8 +110,8 @@ export class LineChannel implements PlatformChannel {
    *
    * WHY reply-first-then-push 策略：
    * LINE 對 push message 有配額限制（成本），但 reply 完全免費。
-   * 我們快取 replyToken 以最大化免費回覆的使用，
-   * 只在 token 過期或無效時才消耗 push 配額。
+   * 我們從 pool 取出 replyToken 以最大化免費回覆的使用，
+   * 只在 token 不存在或無效時才消耗 push 配額。
    */
   async sendMessage(groupId: string, content: string): Promise<void> {
     if (!this.client) {
@@ -122,24 +124,15 @@ export class LineChannel implements PlatformChannel {
       { type: 'text', text: truncated },
     ]
 
-    // 嘗試使用快取的 replyToken
-    const cached = this.replyTokenCache.get(groupId)
-    if (cached && Date.now() - cached.cachedAt < this.config.DELIVERY_REPLY_TOKEN_FRESHNESS_MS) {
+    // 嘗試從 pool 取出有效的 replyToken（pool 自動處理過期判斷）
+    const token = this.pool.claim(groupId)
+    if (token) {
       try {
-        await this.client.replyMessage({
-          replyToken: cached.token,
-          messages,
-        })
-        // 成功後刪除已使用的 token（每個 token 只能用一次）
-        this.replyTokenCache.delete(groupId)
+        await this.client.replyMessage({ replyToken: token, messages })
         return
       }
       catch (error) {
-        // replyToken 過期或無效，fallback 到 pushMessage
-        lineLog
-          .withError(error)
-          .warn('replyMessage failed, falling back to pushMessage')
-        this.replyTokenCache.delete(groupId)
+        lineLog.withError(error).warn('replyMessage failed, falling back to pushMessage')
       }
     }
 
@@ -235,10 +228,7 @@ export class LineChannel implements PlatformChannel {
     if (!groupId || !userId)
       return
 
-    this.replyTokenCache.set(groupId, {
-      token: event.replyToken,
-      cachedAt: Date.now(),
-    })
+    this.pool.store(groupId, event.replyToken)
 
     // 取得使用者名稱（嘗試 getGroupMemberProfile，失敗 fallback 到 userId）
     const userName = await this.resolveUserName(groupId, userId)

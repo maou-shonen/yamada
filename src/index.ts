@@ -26,7 +26,7 @@ export interface MainOptions {
  * 啟動所有已設定的平台 channels。
  * 生產環境建議改用 src/discord/index.ts 或 src/line/index.ts 分別啟動。
  */
-async function main(options?: MainOptions): Promise<void> {
+async function main(options?: MainOptions): Promise<() => Promise<void>> {
   log.info('Loading config...')
   const config = loadConfig()
 
@@ -66,9 +66,12 @@ async function main(options?: MainOptions): Promise<void> {
     })
     .info('yamada is running')
 
+  // 建立 shutdown 函式供外部（測試）呼叫
+  const shutdown = () => app.shutdown(activeChannels)
+
   // Graceful Shutdown — process.exit(0) 放在入口點層級，確保清理後硬退出
   const onShutdown = () => {
-    app.shutdown(activeChannels)
+    shutdown()
       .then(() => process.exit(0))
       .catch((err) => {
         log.withError(err).error('Shutdown failed')
@@ -77,6 +80,8 @@ async function main(options?: MainOptions): Promise<void> {
   }
   process.on('SIGINT', onShutdown)
   process.on('SIGTERM', onShutdown)
+
+  return shutdown
 }
 
 // Global error handlers（不 crash bot）

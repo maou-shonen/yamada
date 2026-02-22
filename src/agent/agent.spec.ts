@@ -1,7 +1,6 @@
 import type { Config } from '../config/index.ts'
 import type { AgentAction } from '../lib/generator'
-import type { StoredMessage } from '../types'
-import type { PlatformChannel, UnifiedMessage } from '../types'
+import type { PlatformChannel, StoredMessage, UnifiedMessage } from '../types'
 import type { AgentServices } from './index'
 import { describe, expect, mock, test } from 'bun:test'
 import { createTestConfig } from '../__tests__/helpers/config.ts'
@@ -319,7 +318,7 @@ describe('Agent', () => {
     const { sqlite, db } = setupTestDb()
     const { services, mocks } = createFakeServices()
     let resolveGenerate!: (val: { actions: AgentAction[], usage: { promptTokens: number, completionTokens: number, totalTokens: number } }) => void
-    const generateCalled = new Promise<void>(r => {
+    const generateCalled = new Promise<void>((r) => {
       mocks.generateReplyMock.mockImplementationOnce(
         () => {
           r()

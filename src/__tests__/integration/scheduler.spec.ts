@@ -1,17 +1,17 @@
-import { afterEach, describe, expect, it, jest } from 'bun:test'
+import type { Database } from 'bun:sqlite'
+import type { Agent } from '../../agent/index.ts'
 import { existsSync, mkdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import type { Database } from 'bun:sqlite'
-import type { Agent } from '../../agent/index.ts'
+import { afterEach, describe, expect, it, jest } from 'bun:test'
 import { createScheduler } from '../../scheduler/index'
 import {
   claimDueTriggers,
   recoverStaleTriggers,
   upsertTrigger,
 } from '../../scheduler/trigger-store'
-import { createTestConfig } from '../helpers/config'
 import { closeMainDb, openMainDb } from '../../storage/main-db'
+import { createTestConfig } from '../helpers/config'
 
 interface TriggerRow {
   group_id: string
@@ -63,10 +63,14 @@ describe('Scheduler 持久化事件佇列整合測試', () => {
       const walPath = `${dbPath}-wal`
       const shmPath = `${dbPath}-shm`
 
-      if (existsSync(dbPath)) rmSync(dbPath, { force: true })
-      if (existsSync(walPath)) rmSync(walPath, { force: true })
-      if (existsSync(shmPath)) rmSync(shmPath, { force: true })
-      if (existsSync(dir)) rmSync(dir, { recursive: true, force: true })
+      if (existsSync(dbPath))
+        rmSync(dbPath, { force: true })
+      if (existsSync(walPath))
+        rmSync(walPath, { force: true })
+      if (existsSync(shmPath))
+        rmSync(shmPath, { force: true })
+      if (existsSync(dir))
+        rmSync(dir, { recursive: true, force: true })
     }
     tempDirs.length = 0
     jest.useRealTimers()

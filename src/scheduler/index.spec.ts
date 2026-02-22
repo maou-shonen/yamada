@@ -1,6 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it, jest } from 'bun:test'
 import type { Database } from 'bun:sqlite'
 import type { Agent } from '../agent/index.ts'
+import { afterEach, beforeEach, describe, expect, it, jest } from 'bun:test'
 import { createScheduler } from './index'
 
 interface Deferred<T> {

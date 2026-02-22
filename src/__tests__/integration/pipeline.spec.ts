@@ -1,11 +1,9 @@
 import type { AgentServices } from '../../agent/index'
 import type { PlatformChannel, UnifiedMessage } from '../../types'
 import { describe, expect, mock, test } from 'bun:test'
-import { shouldRun } from '../../lib/observer'
-import { createTestConfig } from '../helpers/config.ts'
-import { setupTestDb } from '../helpers/setup-db'
-import { deliverReaction, deliverReply } from '../../lib/delivery'
 import { Agent } from '../../agent/index'
+import { deliverReaction, deliverReply } from '../../lib/delivery'
+import { shouldRun } from '../../lib/observer'
 import {
   getMessageCount,
   getRecentMessages,
@@ -13,6 +11,8 @@ import {
   saveMessage,
 } from '../../storage/messages'
 import { getGroupSummary, upsertGroupSummary } from '../../storage/summaries'
+import { createTestConfig } from '../helpers/config.ts'
+import { setupTestDb } from '../helpers/setup-db'
 
 Object.assign(process.env, {
   DISCORD_TOKEN: 'test-token',

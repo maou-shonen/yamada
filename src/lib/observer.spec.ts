@@ -1,10 +1,10 @@
+import type { Database } from 'bun:sqlite'
 import type { Config } from '../config/index.ts'
 import type { ObserverDeps } from './observer'
-import { Database } from 'bun:sqlite'
 import { describe, expect, mock, test } from 'bun:test'
 import { createTestConfig } from '../__tests__/helpers/config.ts'
-import { getDistinctUserIds, getMessagesByUser, getMessagesSince } from '../storage/messages'
 import { setupTestDb } from '../__tests__/helpers/setup-db'
+import { getDistinctUserIds, getMessagesByUser, getMessagesSince } from '../storage/messages'
 import {
   getGroupSummary,
   getUserSummary,

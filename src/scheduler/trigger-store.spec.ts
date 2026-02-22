@@ -1,8 +1,8 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
+import type { Database } from 'bun:sqlite'
 import { rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { Database } from 'bun:sqlite'
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { closeMainDb, openMainDb } from '../storage/main-db'
 import { claimDueTriggers, completeTrigger, recoverStaleTriggers, upsertTrigger } from './trigger-store'
 

@@ -11,8 +11,7 @@ import {
 } from 'bun:test'
 import { createTestConfig } from '../__tests__/helpers/config.ts'
 import { LineChannel } from './channel.ts'
-
-// ── 測試用 config ──────────────────────────────────
+import { ReplyTokenPool } from './reply-token-pool.ts'
 
 // ── Helper: 產生有效的 LINE webhook 簽名 ──────────
 
@@ -402,16 +401,9 @@ describe('LineChannel', () => {
       const mockClient = createMockClient()
       injectMockClient(channel, mockClient)
 
-      // 模擬快取 replyToken
-      const cache = (
-        channel as unknown as {
-          replyTokenCache: Map<string, { token: string, cachedAt: number }>
-        }
-      ).replyTokenCache
-      cache.set('Cgroup123', {
-        token: 'fresh-token',
-        cachedAt: Date.now(),
-      })
+      // 透過 pool 存放新鮮的 token
+      const pool = (channel as unknown as { pool: ReplyTokenPool }).pool
+      pool.store('Cgroup123', 'fresh-token')
 
       await channel.sendMessage('Cgroup123', '回覆內容')
 
@@ -422,27 +414,30 @@ describe('LineChannel', () => {
       })
       expect(mockClient.pushMessage).not.toHaveBeenCalled()
 
-      // 使用後 token 應被刪除
-      expect(cache.has('Cgroup123')).toBe(false)
+      // 使用後 token 應被 pool 移除（claim 返回 null）
+      expect(pool.claim('Cgroup123')).toBeNull()
     })
 
     test('replyToken 過期 → 直接使用 pushMessage', async () => {
-      await channel.start()
+      // 建立可控時間的 pool 並注入 channel
+      let nowMs = Date.now()
+      const customPool = new ReplyTokenPool(
+        config.DELIVERY_REPLY_TOKEN_FRESHNESS_MS,
+        () => nowMs,
+      )
+      const testChannel = new LineChannel(config, { pool: customPool })
+      await testChannel.start()
       const mockClient = createMockClient()
-      injectMockClient(channel, mockClient)
+      injectMockClient(testChannel, mockClient)
 
-      // 模擬過期的 replyToken（超過 30 秒）
-      const cache = (
-        channel as unknown as {
-          replyTokenCache: Map<string, { token: string, cachedAt: number }>
-        }
-      ).replyTokenCache
-      cache.set('Cgroup123', {
-        token: 'stale-token',
-        cachedAt: Date.now() - 31_000, // 31 秒前
-      })
+      // 存放 token（此時時間為 nowMs）
+      customPool.store('Cgroup123', 'stale-token')
 
-      await channel.sendMessage('Cgroup123', '推送內容')
+      // 模擬時間快進 31 秒（超過 30 秒的 freshness），讓 token 過期
+      nowMs += 31_000
+
+      await testChannel.sendMessage('Cgroup123', '推送內容')
+      await testChannel.stop()
 
       expect(mockClient.replyMessage).not.toHaveBeenCalled()
       expect(mockClient.pushMessage).toHaveBeenCalledTimes(1)
@@ -460,16 +455,9 @@ describe('LineChannel', () => {
       )
       injectMockClient(channel, mockClient)
 
-      // 模擬新鮮的 replyToken
-      const cache = (
-        channel as unknown as {
-          replyTokenCache: Map<string, { token: string, cachedAt: number }>
-        }
-      ).replyTokenCache
-      cache.set('Cgroup123', {
-        token: 'bad-token',
-        cachedAt: Date.now(),
-      })
+      // 透過 pool 存放新鮮的 token
+      const pool = (channel as unknown as { pool: ReplyTokenPool }).pool
+      pool.store('Cgroup123', 'bad-token')
 
       await channel.sendMessage('Cgroup123', '測試 fallback')
 
@@ -540,15 +528,10 @@ describe('LineChannel', () => {
       await sendWebhook(port, { events: [event] }, config.LINE_CHANNEL_SECRET!)
       await new Promise(r => setTimeout(r, 100))
 
-      const cache = (
-        channel as unknown as {
-          replyTokenCache: Map<string, { token: string, cachedAt: number }>
-        }
-      ).replyTokenCache
-
-      const entry = cache.get('CgroupABC')
-      expect(entry).toBeDefined()
-      expect(entry!.token).toBe('cached-token-123')
+      // 透過 pool 驗證 token 已被儲存
+      const pool = (channel as unknown as { pool: ReplyTokenPool }).pool
+      const token = pool.claim('CgroupABC')
+      expect(token).toBe('cached-token-123')
     })
   })
 
@@ -578,6 +561,93 @@ describe('LineChannel', () => {
       await new Promise(r => setTimeout(r, 100))
 
       expect(received.length).toBe(0)
+    })
+  })
+
+  describe('ReplyTokenPool 整合', () => {
+    test('多個 webhook 事件儲存多個 token', async () => {
+      await channel.start()
+      const mockClient = createMockClient()
+      injectMockClient(channel, mockClient)
+      const port = (channel as unknown as { server: { port: number } }).server.port
+
+      const pool = (channel as unknown as { pool: ReplyTokenPool }).pool
+
+      // 傳送 3 個不同 replyToken 的 webhook 事件到同一群組
+      for (let i = 1; i <= 3; i++) {
+        const event = createGroupMessageEvent({
+          replyToken: `token-${i}`,
+          groupId: 'CgroupABC',
+          messageId: `msg-00${i}`,
+        })
+        await sendWebhook(port, { events: [event] }, config.LINE_CHANNEL_SECRET!)
+      }
+      await new Promise(r => setTimeout(r, 100))
+
+      // pool 應按 FIFO 順序累積 3 個 token（而非覆蓋）
+      expect(pool.claim('CgroupABC')).toBe('token-1')
+      expect(pool.claim('CgroupABC')).toBe('token-2')
+      expect(pool.claim('CgroupABC')).toBe('token-3')
+      expect(pool.claim('CgroupABC')).toBeNull()
+    })
+
+    test('多次 sendMessage 使用不同 token', async () => {
+      await channel.start()
+      const mockClient = createMockClient()
+      injectMockClient(channel, mockClient)
+
+      const pool = (channel as unknown as { pool: ReplyTokenPool }).pool
+
+      // 預先存放 2 個不同的 token
+      pool.store('Cgroup123', 'token-A')
+      pool.store('Cgroup123', 'token-B')
+
+      await channel.sendMessage('Cgroup123', '第一次回覆')
+      await channel.sendMessage('Cgroup123', '第二次回覆')
+
+      // 兩次都應使用 replyMessage，不使用 pushMessage
+      expect(mockClient.replyMessage).toHaveBeenCalledTimes(2)
+      expect(mockClient.pushMessage).not.toHaveBeenCalled()
+
+      // 驗證兩次使用了不同的 token（FIFO 順序）
+      const calls = (mockClient.replyMessage as ReturnType<typeof mock>).mock.calls as Array<[{ replyToken: string, messages: unknown[] }]>
+      expect(calls[0][0].replyToken).toBe('token-A')
+      expect(calls[1][0].replyToken).toBe('token-B')
+    })
+
+    test('pool 耗盡後 fallback', async () => {
+      await channel.start()
+      const mockClient = createMockClient()
+      injectMockClient(channel, mockClient)
+
+      const pool = (channel as unknown as { pool: ReplyTokenPool }).pool
+
+      // 只存放 1 個 token
+      pool.store('Cgroup123', 'only-token')
+
+      // 第一次 sendMessage 應使用 replyMessage（有 token）
+      await channel.sendMessage('Cgroup123', '第一次')
+      // 第二次 sendMessage pool 已空，應 fallback 到 pushMessage
+      await channel.sendMessage('Cgroup123', '第二次')
+
+      expect(mockClient.replyMessage).toHaveBeenCalledTimes(1)
+      expect(mockClient.pushMessage).toHaveBeenCalledTimes(1)
+    })
+
+    test('stop() 清空 pool', async () => {
+      await channel.start()
+      const pool = (channel as unknown as { pool: ReplyTokenPool }).pool
+
+      // 存放多個 token
+      pool.store('Cgroup123', 'before-stop-token')
+      pool.store('CgroupXYZ', 'another-token')
+
+      // stop() 應清空 pool
+      await channel.stop()
+
+      // pool 已被清空，claim 應返回 null
+      expect(pool.claim('Cgroup123')).toBeNull()
+      expect(pool.claim('CgroupXYZ')).toBeNull()
     })
   })
 })
