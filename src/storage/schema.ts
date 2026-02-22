@@ -1,4 +1,4 @@
-import { index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core'
+import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core'
 
 /**
  * 訊息表 - 儲存此群組的所有訊息
@@ -51,4 +51,24 @@ export const groupSummaries = sqliteTable(
     summary: text('summary').notNull(),
     updatedAt: integer('updated_at').notNull(),
   },
+)
+
+/**
+ * 用戶統計表 - 儲存每個用戶每日的統計數據
+ * Per-group DB：複合主鍵 (userId, date)
+ * date: ISO format 'YYYY-MM-DD' in UTC
+ */
+export const userStats = sqliteTable(
+  'user_stats',
+  {
+    userId: text('user_id').notNull(),
+    date: text('date').notNull(),
+    messageCount: integer('message_count').notNull().default(0),
+    stickerCount: integer('sticker_count').notNull().default(0),
+    urlCount: integer('url_count').notNull().default(0),
+    mentionCount: integer('mention_count').notNull().default(0),
+  },
+  table => ({
+    pk: primaryKey({ columns: [table.userId, table.date] }),
+  }),
 )

@@ -88,6 +88,17 @@ function initSchema(sqlite: Database): void {
       updated_at INTEGER NOT NULL
     )
   `)
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS user_stats (
+      user_id TEXT NOT NULL,
+      date TEXT NOT NULL,
+      message_count INTEGER NOT NULL DEFAULT 0,
+      sticker_count INTEGER NOT NULL DEFAULT 0,
+      url_count INTEGER NOT NULL DEFAULT 0,
+      mention_count INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (user_id, date)
+    )
+  `)
 }
 
 /**

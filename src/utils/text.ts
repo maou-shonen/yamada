@@ -25,3 +25,8 @@ export function isEmbeddableContent(content: string): boolean {
 export function estimateTokens(text: string, ratio: number): number {
   return Math.ceil(text.length / ratio)
 }
+
+/** 檢查內容是否包含 URL（http:// 或 https:// 開頭） */
+export function containsUrl(content: string): boolean {
+  return /https?:\/\/\S+/.test(content)
+}
