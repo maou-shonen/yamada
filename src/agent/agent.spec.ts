@@ -62,6 +62,7 @@ function createFakeServices() {
   const deliverReactionMock = mock(async () => {})
   const runObserverMock = mock(async () => {})
   const processNewMessagesMock = mock(async () => {})
+  const recordActivityMock = mock(() => {})
 
   const services: AgentServices = {
     saveMessage: saveMessageMock as unknown as AgentServices['saveMessage'],
@@ -73,6 +74,7 @@ function createFakeServices() {
     deliverReaction: deliverReactionMock as unknown as AgentServices['deliverReaction'],
     runObserver: runObserverMock as unknown as AgentServices['runObserver'],
     processNewMessages: processNewMessagesMock as unknown as AgentServices['processNewMessages'],
+    recordActivity: recordActivityMock as unknown as AgentServices['recordActivity'],
   }
 
   return {
@@ -87,6 +89,7 @@ function createFakeServices() {
       deliverReactionMock,
       runObserverMock,
       processNewMessagesMock,
+      recordActivityMock,
     },
   }
 }
@@ -112,6 +115,122 @@ describe('Agent', () => {
     // 確認不會觸發 pipeline
     expect(mocks.assembleContextMock.mock.calls.length).toBe(0)
     expect(mocks.generateReplyMock.mock.calls.length).toBe(0)
+  })
+
+  test('receiveMessage → 觸發 stats 記錄', async () => {
+    const { sqlite, db } = setupTestDb()
+    const { services, mocks } = createFakeServices()
+    const agent = new Agent({
+      groupId: 'group1',
+      config: makeConfig(),
+      db,
+      sqliteDb: sqlite,
+      channels: new Map(),
+      services,
+    })
+
+    const msg = makeMessage()
+    agent.receiveMessage(msg)
+
+    expect(mocks.recordActivityMock.mock.calls.length).toBe(1)
+    expect(mocks.recordActivityMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        userId: 'u1',
+        isSticker: false,
+        hasUrl: false,
+        isMention: false,
+        date: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+      }),
+    )
+  })
+
+  test('receiveMessage → 貼圖訊息分類正確', async () => {
+    const { sqlite, db } = setupTestDb()
+    const { services, mocks } = createFakeServices()
+    const agent = new Agent({
+      groupId: 'group1',
+      config: makeConfig(),
+      db,
+      sqliteDb: sqlite,
+      channels: new Map(),
+      services,
+    })
+
+    const msg = makeMessage({ content: '[貼圖]' })
+    agent.receiveMessage(msg)
+
+    expect(mocks.recordActivityMock.mock.calls.length).toBe(1)
+    expect(mocks.recordActivityMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ isSticker: true }),
+    )
+  })
+
+  test('receiveMessage → 含 URL 訊息分類正確', async () => {
+    const { sqlite, db } = setupTestDb()
+    const { services, mocks } = createFakeServices()
+    const agent = new Agent({
+      groupId: 'group1',
+      config: makeConfig(),
+      db,
+      sqliteDb: sqlite,
+      channels: new Map(),
+      services,
+    })
+
+    const msg = makeMessage({ content: '看這個 https://example.com' })
+    agent.receiveMessage(msg)
+
+    expect(mocks.recordActivityMock.mock.calls.length).toBe(1)
+    expect(mocks.recordActivityMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ hasUrl: true }),
+    )
+  })
+
+  test('receiveMessage → @mention 訊息分類正確', async () => {
+    const { sqlite, db } = setupTestDb()
+    const { services, mocks } = createFakeServices()
+    const agent = new Agent({
+      groupId: 'group1',
+      config: makeConfig(),
+      db,
+      sqliteDb: sqlite,
+      channels: new Map(),
+      services,
+    })
+
+    const msg = makeMessage({ isMention: true })
+    agent.receiveMessage(msg)
+
+    expect(mocks.recordActivityMock.mock.calls.length).toBe(1)
+    expect(mocks.recordActivityMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ isMention: true }),
+    )
+  })
+
+  test('receiveMessage → stats 失敗不阻塞訊息管線', async () => {
+    const { sqlite, db } = setupTestDb()
+    const { services, mocks } = createFakeServices()
+    mocks.recordActivityMock.mockImplementation(() => {
+      throw new Error('Stats error')
+    })
+    const agent = new Agent({
+      groupId: 'group1',
+      config: makeConfig(),
+      db,
+      sqliteDb: sqlite,
+      channels: new Map(),
+      services,
+    })
+
+    const msg = makeMessage()
+    // 不應該拋出異常
+    expect(() => agent.receiveMessage(msg)).not.toThrow()
+    // saveMessage 應該仍然被呼叫
+    expect(mocks.saveMessageMock.mock.calls.length).toBe(1)
   })
 
   test('processTriggeredMessages → 完整 pipeline: assembleContext + generateReply + deliverReply + saveBotMessage', async () => {

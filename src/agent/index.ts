@@ -9,6 +9,8 @@ import { runObserver } from '../lib/observer'
 import { log } from '../logger'
 import { processNewMessages } from '../storage/embedding'
 import { getRecentMessages, saveBotMessage, saveMessage } from '../storage/messages'
+import { recordActivity } from '../storage/user-stats'
+import { containsUrl } from '../utils'
 
 export interface AgentServices {
   saveMessage: typeof saveMessage
@@ -20,6 +22,7 @@ export interface AgentServices {
   deliverReaction: typeof deliverReaction
   runObserver: typeof runObserver
   processNewMessages: typeof processNewMessages
+  recordActivity: typeof recordActivity
 }
 
 const defaultServices: AgentServices = {
@@ -32,6 +35,7 @@ const defaultServices: AgentServices = {
   deliverReaction,
   runObserver,
   processNewMessages,
+  recordActivity,
 }
 
 export interface AgentOptions {
@@ -89,6 +93,23 @@ export class Agent {
       .info('Received message')
 
     this.services.saveMessage(this.db, message)
+
+    // 記錄用戶活動統計
+    try {
+      const date = new Date().toISOString().slice(0, 10) // UTC YYYY-MM-DD
+      const isSticker = message.content === '[貼圖]'
+      const hasUrl = containsUrl(message.content)
+      this.services.recordActivity(this.db, {
+        userId: message.userId,
+        date,
+        isSticker,
+        hasUrl,
+        isMention: message.isMention,
+      })
+    }
+    catch (error) {
+      this.log.withError(error).warn('記錄用戶活動統計失敗')
+    }
   }
 
   /**
