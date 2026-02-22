@@ -1,3 +1,9 @@
+/**
+ * 貼圖在 UnifiedMessage.content 中的統一字串表示
+ * WHY: 兩個平台都將貼圖轉換為此字串，Agent 靠此字串判斷 isSticker
+ */
+export const STICKER_CONTENT = '[貼圖]'
+
 /** 截斷字串至指定長度，超過時以 "..." 結尾 */
 export function truncateText(text: string, maxLength: number): string {
   if (text.length <= maxLength)

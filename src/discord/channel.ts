@@ -9,7 +9,7 @@ import {
 
 } from 'discord.js'
 import { log } from '../logger.ts'
-import { truncateText } from '../utils/text.ts'
+import { truncateText, STICKER_CONTENT } from '../utils/text.ts'
 
 const discordLog = log.withPrefix('[Discord]')
 
@@ -161,7 +161,7 @@ export class DiscordChannel implements PlatformChannel {
         content = '[圖片]'
       }
       else if (message.stickers.size > 0) {
-        content = '[貼圖]'
+        content = STICKER_CONTENT
       }
       else {
         // 無 content、無 attachment、無 sticker → 跳過

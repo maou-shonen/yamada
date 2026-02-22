@@ -10,7 +10,7 @@ import { log } from '../logger'
 import { processNewMessages } from '../storage/embedding'
 import { getRecentMessages, saveBotMessage, saveMessage } from '../storage/messages'
 import { recordActivity } from '../storage/user-stats'
-import { containsUrl } from '../utils'
+import { containsUrl, STICKER_CONTENT } from '../utils'
 
 export interface AgentServices {
   saveMessage: typeof saveMessage
@@ -97,7 +97,7 @@ export class Agent {
     // 記錄用戶活動統計
     try {
       const date = new Date().toISOString().slice(0, 10) // UTC YYYY-MM-DD
-      const isSticker = message.content === '[貼圖]'
+      const isSticker = message.content === STICKER_CONTENT
       const hasUrl = containsUrl(message.content)
       this.services.recordActivity(this.db, {
         userId: message.userId,

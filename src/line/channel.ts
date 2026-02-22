@@ -2,7 +2,7 @@ import type { Config } from '../config/index.ts'
 import type { PlatformChannel, UnifiedMessage } from '../types.ts'
 import { messagingApi, validateSignature } from '@line/bot-sdk'
 import { log } from '../logger'
-import { truncateText } from '../utils/text.ts'
+import { truncateText, STICKER_CONTENT } from '../utils/text.ts'
 import { ReplyTokenPool } from './reply-token-pool.ts'
 
 const lineLog = log.withPrefix('[LINE]')
@@ -37,7 +37,7 @@ interface LineWebhookBody {
 
 const MESSAGE_TYPE_LABELS: Record<string, string> = {
   image: '[圖片]',
-  sticker: '[貼圖]',
+  sticker: STICKER_CONTENT,
   video: '[影片]',
   audio: '[音訊]',
   file: '[檔案]',

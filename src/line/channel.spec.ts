@@ -421,8 +421,9 @@ describe('LineChannel', () => {
     test('replyToken 過期 → 直接使用 pushMessage', async () => {
       // 建立可控時間的 pool 並注入 channel
       let nowMs = Date.now()
+      const FRESHNESS_MS = 30_000 // 此測試獨立控制 freshness 邊界，不依賴 config
       const customPool = new ReplyTokenPool(
-        config.DELIVERY_REPLY_TOKEN_FRESHNESS_MS,
+        FRESHNESS_MS,
         () => nowMs,
       )
       const testChannel = new LineChannel(config, { pool: customPool })
@@ -433,8 +434,8 @@ describe('LineChannel', () => {
       // 存放 token（此時時間為 nowMs）
       customPool.store('Cgroup123', 'stale-token')
 
-      // 模擬時間快進 31 秒（超過 30 秒的 freshness），讓 token 過期
-      nowMs += 31_000
+      // 模擬時間快進（超過 freshness），讓 token 過期
+      nowMs += FRESHNESS_MS + 1_000
 
       await testChannel.sendMessage('Cgroup123', '推送內容')
       await testChannel.stop()
