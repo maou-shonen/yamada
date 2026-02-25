@@ -17,6 +17,8 @@ export const pendingTriggers = sqliteTable(
     triggerAt: integer('trigger_at').notNull(),
     /** 累積字元數（用於溢出觸發檢測），預設 0 */
     pendingChars: integer('pending_chars').notNull().default(0),
+    /** 是否曾在此批次出現 mention；一旦為 true 會持續保留 */
+    isMention: integer('is_mention', { mode: 'boolean' }).notNull().default(false),
     /** 狀態：'pending' | 'processing'，預設 'pending' */
     status: text('status').notNull().default('pending'),
     /** 建立時間（epoch ms） */

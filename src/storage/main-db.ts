@@ -58,11 +58,18 @@ function initMainSchema(sqlite: Database): void {
       platform TEXT NOT NULL,
       trigger_at INTEGER NOT NULL,
       pending_chars INTEGER NOT NULL DEFAULT 0,
+      is_mention INTEGER NOT NULL DEFAULT 0,
       status TEXT NOT NULL DEFAULT 'pending',
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     )
   `)
+  try {
+    sqlite.exec(`ALTER TABLE pending_triggers ADD COLUMN is_mention INTEGER NOT NULL DEFAULT 0`)
+  }
+  catch {
+    // 已存在時略過（相容舊有 DB）
+  }
   sqlite.exec(`
     CREATE INDEX IF NOT EXISTS idx_triggers_status_trigger 
     ON pending_triggers(status, trigger_at)

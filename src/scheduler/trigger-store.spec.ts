@@ -17,6 +17,7 @@ interface TriggerRow {
   platform: string
   trigger_at: number
   pending_chars: number
+  is_mention: number
   status: string
   created_at: number
   updated_at: number
@@ -24,7 +25,7 @@ interface TriggerRow {
 
 function getTrigger(sqlite: Database, groupId: string): TriggerRow | null {
   const row = sqlite.query(
-    `SELECT group_id, platform, trigger_at, pending_chars, status, created_at, updated_at
+    `SELECT group_id, platform, trigger_at, pending_chars, is_mention, status, created_at, updated_at
      FROM pending_triggers WHERE group_id = ?`,
   ).get(groupId)
 
@@ -53,6 +54,7 @@ describe('trigger-store', () => {
     expect(row).not.toBeNull()
     expect(row?.platform).toBe('discord')
     expect(row?.pending_chars).toBe(120)
+    expect(row?.is_mention).toBe(0)
     expect(row?.status).toBe('pending')
     expect(row?.trigger_at).toBe((row?.updated_at ?? 0) + testConfig.DEBOUNCE_SILENCE_MS)
     expect(row?.created_at).toBe(row?.updated_at)
@@ -77,7 +79,18 @@ describe('trigger-store', () => {
 
     const row = getTrigger(sqlite, 'group-urgent')
     expect(row).not.toBeNull()
+    expect(row?.is_mention).toBe(1)
     expect(row?.trigger_at).toBe((row?.updated_at ?? 0) + testConfig.DEBOUNCE_URGENT_MS)
+  })
+
+  it('upsertTrigger isMention 應為 sticky flag（曾 mention 後維持 true）', () => {
+    upsertTrigger(sqlite, 'group-sticky', 'discord', true, 20, testConfig)
+    upsertTrigger(sqlite, 'group-sticky', 'discord', false, 30, testConfig)
+
+    const row = getTrigger(sqlite, 'group-sticky')
+    expect(row).not.toBeNull()
+    expect(row?.is_mention).toBe(1)
+    expect(row?.trigger_at).toBe((row?.updated_at ?? 0) + testConfig.DEBOUNCE_SILENCE_MS)
   })
 
   it('upsertTrigger 累積超過 overflow 門檻時應立即觸發', () => {
@@ -93,26 +106,26 @@ describe('trigger-store', () => {
   it('claimDueTriggers 應 claim 到期 triggers 並更新為 processing', () => {
     const now = Date.now()
     sqlite.run(
-      `INSERT INTO pending_triggers (group_id, platform, trigger_at, pending_chars, status, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      ['group-due-1', 'discord', now - 10, 100, 'pending', now - 10, now - 10],
+      `INSERT INTO pending_triggers (group_id, platform, trigger_at, pending_chars, is_mention, status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      ['group-due-1', 'discord', now - 10, 100, 1, 'pending', now - 10, now - 10],
     )
     sqlite.run(
-      `INSERT INTO pending_triggers (group_id, platform, trigger_at, pending_chars, status, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      ['group-due-2', 'line', now, 200, 'pending', now - 10, now - 10],
+      `INSERT INTO pending_triggers (group_id, platform, trigger_at, pending_chars, is_mention, status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      ['group-due-2', 'line', now, 200, 0, 'pending', now - 10, now - 10],
     )
     sqlite.run(
-      `INSERT INTO pending_triggers (group_id, platform, trigger_at, pending_chars, status, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      ['group-future', 'discord', now + 60_000, 300, 'pending', now - 10, now - 10],
+      `INSERT INTO pending_triggers (group_id, platform, trigger_at, pending_chars, is_mention, status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      ['group-future', 'discord', now + 60_000, 300, 1, 'pending', now - 10, now - 10],
     )
 
     const claimed = claimDueTriggers(sqlite, now)
 
     expect(claimed).toHaveLength(2)
-    expect(claimed).toContainEqual({ groupId: 'group-due-1', platform: 'discord' })
-    expect(claimed).toContainEqual({ groupId: 'group-due-2', platform: 'line' })
+    expect(claimed).toContainEqual({ groupId: 'group-due-1', platform: 'discord', isMention: true })
+    expect(claimed).toContainEqual({ groupId: 'group-due-2', platform: 'line', isMention: false })
     expect(getTrigger(sqlite, 'group-due-1')?.status).toBe('processing')
     expect(getTrigger(sqlite, 'group-due-2')?.status).toBe('processing')
     expect(getTrigger(sqlite, 'group-future')?.status).toBe('pending')
@@ -121,16 +134,16 @@ describe('trigger-store', () => {
   it('claimDueTriggers 應具備 atomic 行為，重複 claim 不應拿到同一筆', () => {
     const now = Date.now()
     sqlite.run(
-      `INSERT INTO pending_triggers (group_id, platform, trigger_at, pending_chars, status, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      ['group-atomic', 'discord', now - 1, 10, 'pending', now - 1, now - 1],
+      `INSERT INTO pending_triggers (group_id, platform, trigger_at, pending_chars, is_mention, status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      ['group-atomic', 'discord', now - 1, 10, 0, 'pending', now - 1, now - 1],
     )
 
     const firstClaim = claimDueTriggers(sqlite, now)
     const secondClaim = claimDueTriggers(sqlite, now)
 
     expect(firstClaim).toHaveLength(1)
-    expect(firstClaim[0]).toEqual({ groupId: 'group-atomic', platform: 'discord' })
+    expect(firstClaim[0]).toEqual({ groupId: 'group-atomic', platform: 'discord', isMention: false })
     expect(secondClaim).toHaveLength(0)
   })
 
@@ -146,14 +159,14 @@ describe('trigger-store', () => {
   it('recoverStaleTriggers 應將 processing 恢復為 pending', () => {
     const now = Date.now()
     sqlite.run(
-      `INSERT INTO pending_triggers (group_id, platform, trigger_at, pending_chars, status, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      ['group-stale', 'discord', now - 100, 80, 'processing', now - 100, now - 100],
+      `INSERT INTO pending_triggers (group_id, platform, trigger_at, pending_chars, is_mention, status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      ['group-stale', 'discord', now - 100, 80, 1, 'processing', now - 100, now - 100],
     )
     sqlite.run(
-      `INSERT INTO pending_triggers (group_id, platform, trigger_at, pending_chars, status, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      ['group-pending', 'line', now - 100, 90, 'pending', now - 100, now - 100],
+      `INSERT INTO pending_triggers (group_id, platform, trigger_at, pending_chars, is_mention, status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      ['group-pending', 'line', now - 100, 90, 0, 'pending', now - 100, now - 100],
     )
 
     recoverStaleTriggers(sqlite)

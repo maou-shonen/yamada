@@ -28,14 +28,14 @@ async function flushAsyncWork(): Promise<void> {
 
 function createTestContext() {
   const sqlite = {} as Database
-  const processTriggeredMessages = jest.fn(async (_platform: 'discord' | 'line') => {})
+  const processTriggeredMessages = jest.fn(async (_platform: 'discord' | 'line', _isMention: boolean) => {})
   const getAgent = jest.fn((_groupId: string) => ({
     processTriggeredMessages,
   }) as unknown as Agent)
 
   const triggerStore = {
     recoverStaleTriggers: jest.fn(() => {}),
-    claimDueTriggers: jest.fn((_db: Database, _now: number) => [] as Array<{ groupId: string, platform: string }>),
+    claimDueTriggers: jest.fn((_db: Database, _now: number) => [] as Array<{ groupId: string, platform: string, isMention: boolean }>),
     completeTrigger: jest.fn((_db: Database, _groupId: string) => {}),
   }
 
@@ -112,23 +112,35 @@ describe('scheduler', () => {
     expect(triggerStore.claimDueTriggers).toHaveBeenCalledWith(sqlite, expect.any(Number))
   })
 
-  it('claimed trigger 會呼叫 agent.processTriggeredMessages(platform)', async () => {
+  it('claimed trigger 會呼叫 agent.processTriggeredMessages(platform, isMention)', async () => {
     const { scheduler, triggerStore, processTriggeredMessages } = createTestContext()
-    triggerStore.claimDueTriggers.mockReturnValueOnce([{ groupId: 'group-1', platform: 'discord' }])
+    triggerStore.claimDueTriggers.mockReturnValueOnce([{ groupId: 'group-1', platform: 'discord', isMention: true }])
 
     scheduler.start()
     jest.advanceTimersByTime(10)
     await flushAsyncWork()
 
     expect(processTriggeredMessages).toHaveBeenCalledTimes(1)
-    expect(processTriggeredMessages).toHaveBeenCalledWith('discord')
+    expect(processTriggeredMessages).toHaveBeenCalledWith('discord', true)
+  })
+
+  it('claimed trigger 非 mention 時應傳遞 isMention=false', async () => {
+    const { scheduler, triggerStore, processTriggeredMessages } = createTestContext()
+    triggerStore.claimDueTriggers.mockReturnValueOnce([{ groupId: 'group-2', platform: 'line', isMention: false }])
+
+    scheduler.start()
+    jest.advanceTimersByTime(10)
+    await flushAsyncWork()
+
+    expect(processTriggeredMessages).toHaveBeenCalledTimes(1)
+    expect(processTriggeredMessages).toHaveBeenCalledWith('line', false)
   })
 
   it('processTriggeredMessages 成功或失敗都會 completeTrigger', async () => {
     const { scheduler, triggerStore, processTriggeredMessages, sqlite } = createTestContext()
     triggerStore.claimDueTriggers.mockReturnValueOnce([
-      { groupId: 'group-ok', platform: 'discord' },
-      { groupId: 'group-fail', platform: 'line' },
+      { groupId: 'group-ok', platform: 'discord', isMention: false },
+      { groupId: 'group-fail', platform: 'line', isMention: true },
     ])
 
     processTriggeredMessages
@@ -177,7 +189,7 @@ describe('scheduler', () => {
     const { scheduler, triggerStore, processTriggeredMessages } = createTestContext()
     const deferred = createDeferred<void>()
 
-    triggerStore.claimDueTriggers.mockReturnValueOnce([{ groupId: 'group-1', platform: 'discord' }])
+    triggerStore.claimDueTriggers.mockReturnValueOnce([{ groupId: 'group-1', platform: 'discord', isMention: false }])
     processTriggeredMessages.mockImplementationOnce(() => deferred.promise)
 
     scheduler.start()

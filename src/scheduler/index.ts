@@ -65,7 +65,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
           try {
             const agent = deps.getAgent(trigger.groupId)
             if (agent) {
-              await agent.processTriggeredMessages(trigger.platform as TriggerPlatform)
+              await agent.processTriggeredMessages(trigger.platform as TriggerPlatform, trigger.isMention)
             }
           }
           catch (error) {

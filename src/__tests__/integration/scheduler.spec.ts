@@ -18,6 +18,7 @@ interface TriggerRow {
   platform: string
   trigger_at: number
   pending_chars: number
+  is_mention: number
   status: string
   created_at: number
   updated_at: number
@@ -31,7 +32,7 @@ function makeTempDir(): string {
 
 function getTrigger(sqlite: Database, groupId: string): TriggerRow | null {
   const row = sqlite.query(
-    `SELECT group_id, platform, trigger_at, pending_chars, status, created_at, updated_at
+    `SELECT group_id, platform, trigger_at, pending_chars, is_mention, status, created_at, updated_at
      FROM pending_triggers
      WHERE group_id = ?`,
   ).get(groupId)
@@ -96,7 +97,7 @@ describe('Scheduler 持久化事件佇列整合測試', () => {
 
     const claimed = claimDueTriggers(sqlite, inserted!.trigger_at)
     expect(claimed).toHaveLength(1)
-    expect(claimed[0]).toEqual({ groupId: 'group-silence', platform: 'discord' })
+    expect(claimed[0]).toEqual({ groupId: 'group-silence', platform: 'discord', isMention: false })
     expect(getTrigger(sqlite, 'group-silence')?.status).toBe('processing')
 
     closeMainDb(sqlite)
@@ -118,6 +119,7 @@ describe('Scheduler 持久化事件佇列整合測試', () => {
 
     const row = getTrigger(sqlite, 'group-urgent')
     expect(row).not.toBeNull()
+    expect(row?.is_mention).toBe(1)
     expect(row?.trigger_at).toBe((row?.updated_at ?? 0) + config.DEBOUNCE_URGENT_MS)
     expect(row?.trigger_at).not.toBe((row?.updated_at ?? 0) + config.DEBOUNCE_SILENCE_MS)
 
@@ -144,7 +146,7 @@ describe('Scheduler 持久化事件佇列整合測試', () => {
 
     const claimed = claimDueTriggers(sqlite, Date.now())
     expect(claimed).toHaveLength(1)
-    expect(claimed[0]).toEqual({ groupId: 'group-overflow', platform: 'line' })
+    expect(claimed[0]).toEqual({ groupId: 'group-overflow', platform: 'line', isMention: false })
 
     closeMainDb(sqlite)
   })
@@ -165,14 +167,14 @@ describe('Scheduler 持久化事件佇列整合測試', () => {
     forceTriggerDue(sqlite, 'group-recover')
 
     const firstClaim = claimDueTriggers(sqlite, Date.now())
-    expect(firstClaim).toEqual([{ groupId: 'group-recover', platform: 'discord' }])
+    expect(firstClaim).toEqual([{ groupId: 'group-recover', platform: 'discord', isMention: false }])
     expect(getTrigger(sqlite, 'group-recover')?.status).toBe('processing')
 
     recoverStaleTriggers(sqlite)
     expect(getTrigger(sqlite, 'group-recover')?.status).toBe('pending')
 
     const secondClaim = claimDueTriggers(sqlite, Date.now())
-    expect(secondClaim).toEqual([{ groupId: 'group-recover', platform: 'discord' }])
+    expect(secondClaim).toEqual([{ groupId: 'group-recover', platform: 'discord', isMention: false }])
 
     closeMainDb(sqlite)
   })
@@ -199,8 +201,8 @@ describe('Scheduler 持久化事件佇列整合測試', () => {
 
     const claimed = claimDueTriggers(sqlite, Date.now())
     expect(claimed).toHaveLength(2)
-    expect(claimed).toContainEqual({ groupId: 'group-1', platform: 'discord' })
-    expect(claimed).toContainEqual({ groupId: 'group-2', platform: 'line' })
+    expect(claimed).toContainEqual({ groupId: 'group-1', platform: 'discord', isMention: false })
+    expect(claimed).toContainEqual({ groupId: 'group-2', platform: 'line', isMention: false })
 
     closeMainDb(sqlite)
   })
@@ -223,7 +225,7 @@ describe('Scheduler 持久化事件佇列整合測試', () => {
     upsertTrigger(sqlite, 'group-scheduler', 'discord', false, 50, config)
     forceTriggerDue(sqlite, 'group-scheduler')
 
-    const processTriggeredMessages = jest.fn(async (_platform: 'discord' | 'line') => {})
+    const processTriggeredMessages = jest.fn(async (_platform: 'discord' | 'line', _isMention: boolean) => {})
     const fakeAgent = {
       processTriggeredMessages,
     } as unknown as Agent
@@ -240,7 +242,7 @@ describe('Scheduler 持久化事件佇列整合測試', () => {
     await scheduler.stop()
 
     expect(processTriggeredMessages).toHaveBeenCalledTimes(1)
-    expect(processTriggeredMessages).toHaveBeenCalledWith('discord')
+    expect(processTriggeredMessages).toHaveBeenCalledWith('discord', false)
     expect(getTrigger(sqlite, 'group-scheduler')).toBeNull()
 
     closeMainDb(sqlite)

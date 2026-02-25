@@ -246,7 +246,7 @@ describe('Agent', () => {
       services,
     })
 
-    await agent.processTriggeredMessages('discord')
+    await agent.processTriggeredMessages('discord', false)
 
     expect(mocks.assembleContextMock.mock.calls.length).toBe(1)
     expect(mocks.generateReplyMock.mock.calls.length).toBe(1)
@@ -267,7 +267,7 @@ describe('Agent', () => {
       services,
     })
 
-    await agent.processTriggeredMessages('discord')
+    await agent.processTriggeredMessages('discord', false)
 
     expect(mocks.deliverReplyMock.mock.calls.length).toBe(1)
     expect(mocks.deliverReplyMock).toHaveBeenCalledWith(
@@ -292,7 +292,7 @@ describe('Agent', () => {
       services,
     })
 
-    await agent.processTriggeredMessages('discord')
+    await agent.processTriggeredMessages('discord', false)
 
     expect(mocks.generateReplyMock.mock.calls.length).toBe(1)
     expect(mocks.deliverReplyMock.mock.calls.length).toBe(0)
@@ -320,7 +320,7 @@ describe('Agent', () => {
       services,
     })
 
-    await agent.processTriggeredMessages('discord')
+    await agent.processTriggeredMessages('discord', false)
 
     expect(mocks.deliverReactionMock.mock.calls.length).toBe(1)
     expect(mocks.deliverReactionMock).toHaveBeenCalledWith(
@@ -352,7 +352,7 @@ describe('Agent', () => {
       services,
     })
 
-    await agent.processTriggeredMessages('discord')
+    await agent.processTriggeredMessages('discord', false)
 
     expect(mocks.deliverReactionMock.mock.calls.length).toBe(1)
     expect(mocks.deliverReplyMock.mock.calls.length).toBe(1)
@@ -371,7 +371,7 @@ describe('Agent', () => {
       services,
     })
 
-    await agent.processTriggeredMessages('discord')
+    await agent.processTriggeredMessages('discord', false)
 
     expect(mocks.runObserverMock.mock.calls.length).toBe(1)
     expect(mocks.processNewChunksMock.mock.calls.length).toBe(1)
@@ -389,7 +389,7 @@ describe('Agent', () => {
       services,
     })
 
-    await agent.processTriggeredMessages('discord')
+    await agent.processTriggeredMessages('discord', false)
 
     expect(mocks.runObserverMock.mock.calls.length).toBe(1)
     expect(mocks.processNewChunksMock.mock.calls.length).toBe(0)
@@ -407,7 +407,7 @@ describe('Agent', () => {
       services,
     })
 
-    await agent.processTriggeredMessages('discord')
+    await agent.processTriggeredMessages('discord', false)
 
     expect(mocks.deliverReplyMock.mock.calls.length).toBe(0)
     expect(mocks.saveBotMessageMock.mock.calls.length).toBe(1)
@@ -426,7 +426,7 @@ describe('Agent', () => {
       services,
     })
 
-    await agent.processTriggeredMessages('line')
+    await agent.processTriggeredMessages('line', false)
 
     expect(mocks.deliverReplyMock).toHaveBeenCalledWith(
       expect.objectContaining({ platform: 'line' }),
@@ -458,7 +458,7 @@ describe('Agent', () => {
     })
 
     // 啟動 pipeline（不 await）
-    const pipelinePromise = agent.processTriggeredMessages('discord')
+    const pipelinePromise = agent.processTriggeredMessages('discord', false)
 
     // 等待 generateReply 被呼叫（確保 resolveGenerate 已被指派）
     await generateCalled

@@ -105,7 +105,7 @@ describe('Pipeline 整合測試', () => {
     agent.receiveMessage(makeMessage({ id: 'msg-3', content: '第三則訊息' }))
 
     // 由排程器觸發 AI pipeline
-    await agent.processTriggeredMessages('discord')
+    await agent.processTriggeredMessages('discord', false)
 
     expect((mockChannel.sendMessage as ReturnType<typeof mock>).mock.calls.length).toBeGreaterThanOrEqual(1)
 
@@ -142,7 +142,7 @@ describe('Pipeline 整合測試', () => {
     agent.receiveMessage(makeMessage({ id: 'obs-3', content: '觀察者訊息三', userId: 'user-1' }))
 
     // 由排程器觸發 AI pipeline（包含 Observer fire-and-forget）
-    await agent.processTriggeredMessages('discord')
+    await agent.processTriggeredMessages('discord', false)
 
     // 等待 fire-and-forget Observer 完成
     await new Promise(resolve => setTimeout(resolve, 100))
@@ -171,7 +171,7 @@ describe('Pipeline 整合測試', () => {
     agent.receiveMessage(makeMessage({ id: 'persist-1', content: '持久化測試訊息', userId: 'user-1' }))
 
     // 由排程器觸發 AI pipeline
-    await agent.processTriggeredMessages('discord')
+    await agent.processTriggeredMessages('discord', false)
 
     const messages = getRecentMessages(db, 20)
 

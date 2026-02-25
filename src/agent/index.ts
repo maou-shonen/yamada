@@ -117,15 +117,16 @@ export class Agent {
    * 從 DB 取出近期訊息，組裝 context，生成回覆，投遞。
    *
    * @param platform - 'discord' | 'line'
+   * @param isMention - 本次 trigger 批次是否包含 mention
    */
-  async processTriggeredMessages(platform: 'discord' | 'line'): Promise<void> {
+  async processTriggeredMessages(platform: 'discord' | 'line', isMention: boolean): Promise<void> {
     const startTime = Date.now()
 
     this.log
-      .withMetadata({ platform })
+      .withMetadata({ platform, isMention })
       .info('Starting AI pipeline')
 
-    const pipeline = this.runPipeline(platform, startTime)
+    const pipeline = this.runPipeline(platform, startTime, isMention)
     this.inFlightPipeline = pipeline
     try {
       await pipeline
@@ -152,7 +153,7 @@ export class Agent {
   /**
    * 執行完整 AI pipeline：getRecentMessages → assembleContext → generateReply → delivery → observer → embedding
    */
-  private async runPipeline(platform: 'discord' | 'line', startTime: number): Promise<void> {
+  private async runPipeline(platform: 'discord' | 'line', startTime: number, isMention: boolean): Promise<void> {
     const recentMessages = this.services.getRecentMessages(this.db, this.config.CONTEXT_RECENT_MESSAGE_COUNT)
     this.log.withMetadata({ recentCount: recentMessages.length }).debug('Fetched recent messages')
 
@@ -244,7 +245,7 @@ export class Agent {
 
     const totalDuration = Date.now() - startTime
     this.log
-      .withMetadata({ totalDurationMs: totalDuration, llmDurationMs: llmDuration })
+      .withMetadata({ totalDurationMs: totalDuration, llmDurationMs: llmDuration, isMention })
       .info('AI pipeline completed')
   }
 }
