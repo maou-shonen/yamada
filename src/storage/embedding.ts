@@ -1,14 +1,14 @@
 import type { Database } from 'bun:sqlite'
 import type { Config } from '../config'
 import type { StoredMessage } from '../types'
-import { asc, gte, inArray } from 'drizzle-orm'
+import type { DB } from './db'
 import { embed, embedMany } from 'ai'
+import { asc, gte, inArray } from 'drizzle-orm'
 import * as sqliteVec from 'sqlite-vec'
 import { createEmbeddingProvider } from '../lib/provider.ts'
 import { log } from '../logger'
 import { buildChunks } from './chunking'
 import { getMaxChunkEndTimestamp, saveChunk } from './chunks'
-import type { DB } from './db'
 import * as schema from './schema'
 
 const embeddingLog = log.withPrefix('[Embedding]')
@@ -55,7 +55,6 @@ export async function embedTexts(
 
   return embeddings
 }
-
 
 /**
  * 初始化 chunk 向量表。

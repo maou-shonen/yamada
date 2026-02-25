@@ -22,7 +22,8 @@ export function logit(p: number): number {
   return Math.log(clamped / (1 - clamped))
 }
 
-/** EMA 時間衰減係數：exp(-elapsed * ln(2) / halfLife)
+/**
+ * EMA 時間衰減係數：exp(-elapsed * ln(2) / halfLife)
  *  elapsed = 0 → decay = 1.0（無衰減）
  *  elapsed = halfLife → decay ≈ 0.5
  */

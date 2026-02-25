@@ -9,7 +9,7 @@ import {
 
 } from 'discord.js'
 import { log } from '../logger.ts'
-import { truncateText, STICKER_CONTENT } from '../utils/text.ts'
+import { STICKER_CONTENT, truncateText } from '../utils/text.ts'
 
 const discordLog = log.withPrefix('[Discord]')
 

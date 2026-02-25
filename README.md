@@ -111,12 +111,12 @@ bun run src/index.ts
 
 ### Frequency — 回應頻率控制
 
-| 變數                              | 預設値 | 說明                              |
-| ------------------------------------ | ------- | ---------------------------------- |
-| `FREQUENCY_ENABLED`                  | `true`  | 頻率控制器總開關                   |
-| `FREQUENCY_LONG_HALFLIFE_HOURS`      | `120`   | 長期 EMA 半衰期（小時），預設 5 天     |
-| `FREQUENCY_SHORT_HALFLIFE_HOURS`     | `4`     | 短期 EMA 半衰期（小時），防止連發     |
-| `FREQUENCY_ACTIVE_WINDOW_DAYS`       | `7`     | 計算活躍人數的時間窗口（天）         |
+| 變數                             | 預設値 | 說明                               |
+| -------------------------------- | ------ | ---------------------------------- |
+| `FREQUENCY_ENABLED`              | `true` | 頻率控制器總開關                   |
+| `FREQUENCY_LONG_HALFLIFE_HOURS`  | `120`  | 長期 EMA 半衰期（小時），預設 5 天 |
+| `FREQUENCY_SHORT_HALFLIFE_HOURS` | `4`    | 短期 EMA 半衰期（小時），防止連發  |
+| `FREQUENCY_ACTIVE_WINDOW_DAYS`   | `7`    | 計算活躍人數的時間窗口（天）       |
 
 ### Context — 控制送給 AI 的上下文內容
 

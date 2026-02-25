@@ -2,7 +2,7 @@ import type { Config } from '../config/index.ts'
 import type { PlatformChannel, UnifiedMessage } from '../types.ts'
 import { messagingApi, validateSignature } from '@line/bot-sdk'
 import { log } from '../logger'
-import { truncateText, STICKER_CONTENT } from '../utils/text.ts'
+import { STICKER_CONTENT, truncateText } from '../utils/text.ts'
 import { ReplyTokenPool } from './reply-token-pool.ts'
 
 const lineLog = log.withPrefix('[LINE]')

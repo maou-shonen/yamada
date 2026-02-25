@@ -4,8 +4,8 @@ import type { Config } from '../config/index.ts'
 import type { DB } from '../storage/db'
 import type { StoredMessage } from '../types'
 import { log } from '../logger'
-import { embedText, searchSimilarChunks } from '../storage/embedding'
 import { getChunkContents } from '../storage/chunks'
+import { embedText, searchSimilarChunks } from '../storage/embedding'
 import { getGroupSummary, getUserSummariesForGroup } from '../storage/summaries'
 
 const contextLog = log.withPrefix('[Context]')

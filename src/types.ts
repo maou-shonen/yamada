@@ -53,7 +53,7 @@ export interface StoredMessage {
 export interface StoredChunk {
   id: number
   content: string
-  messageIds: number[]  // CRUD 레이어에서 JSON.parse됨
+  messageIds: number[] // CRUD 레이어에서 JSON.parse됨
   startTimestamp: number
   endTimestamp: number
 }

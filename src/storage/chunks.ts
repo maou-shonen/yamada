@@ -8,7 +8,7 @@ import * as schema from './schema'
  */
 export function saveChunk(
   db: DB,
-  chunk: { content: string; messageIds: number[]; startTimestamp: number; endTimestamp: number },
+  chunk: { content: string, messageIds: number[], startTimestamp: number, endTimestamp: number },
 ): number {
   const result = db
     .insert(schema.chunks)
@@ -33,7 +33,8 @@ export function getChunkById(db: DB, chunkId: number): StoredChunk | null {
     .from(schema.chunks)
     .where(eq(schema.chunks.id, chunkId))
     .get()
-  if (!row) return null
+  if (!row)
+    return null
   return { ...row, messageIds: JSON.parse(row.messageIds) as number[] }
 }
 
@@ -64,7 +65,8 @@ export function getMaxChunkEndTimestamp(db: DB): number | null {
  * 입력한 ID 순서를 유지하며, 존재하지 않는 ID는 제외
  */
 export function getChunkContents(db: DB, chunkIds: number[]): string[] {
-  if (chunkIds.length === 0) return []
+  if (chunkIds.length === 0)
+    return []
   const rows = db
     .select({ id: schema.chunks.id, content: schema.chunks.content })
     .from(schema.chunks)

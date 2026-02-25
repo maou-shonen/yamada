@@ -54,7 +54,7 @@ export function saveFrequencyState(db: DB, state: FrequencyState): void {
 export function countMessagesSince(
   db: DB,
   since: number,
-): { total: number; bot: number } {
+): { total: number, bot: number } {
   const totalRow = db
     .select({ count: count() })
     .from(schema.messages)

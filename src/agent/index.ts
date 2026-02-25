@@ -7,13 +7,13 @@ import { deliverReaction, deliverReply } from '../lib/delivery'
 import { generateReply } from '../lib/generator'
 import { runObserver } from '../lib/observer'
 import { log } from '../logger'
-import { checkFrequency } from './frequency-controller'
-import { calculateDecay, updateEma } from './frequency-math'
-import { getFrequencyState, saveFrequencyState } from '../storage/frequency-stats'
 import { processNewChunks } from '../storage/embedding'
+import { getFrequencyState, saveFrequencyState } from '../storage/frequency-stats'
 import { getRecentMessages, saveBotMessage, saveMessage } from '../storage/messages'
 import { recordActivity } from '../storage/user-stats'
 import { containsUrl, STICKER_CONTENT } from '../utils'
+import { checkFrequency } from './frequency-controller'
+import { calculateDecay, updateEma } from './frequency-math'
 
 export interface AgentServices {
   saveMessage: typeof saveMessage
