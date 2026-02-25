@@ -45,3 +45,15 @@ export interface StoredMessage {
   timestamp: number
   replyToExternalId: string | null
 }
+
+/**
+ * DB에 저장된 chunk 형식
+ * messageIds: JSON parse된 배열 (chunks.ts CRUD 레이어에서 변환)
+ */
+export interface StoredChunk {
+  id: number
+  content: string
+  messageIds: number[]  // CRUD 레이어에서 JSON.parse됨
+  startTimestamp: number
+  endTimestamp: number
+}
