@@ -72,6 +72,8 @@ const configSchema = z.object({
   CONTEXT_RECENT_MESSAGE_COUNT: z.coerce.number().int().positive().default(20),
   /** token 估算比率：每 N 個字元約為 1 token */
   CONTEXT_TOKEN_ESTIMATE_RATIO: z.coerce.number().positive().default(3),
+  /** Chunk 分割的 token 上限（每個 chunk 的最大 token 數） */
+  CHUNK_TOKEN_LIMIT: z.coerce.number().int().positive().default(500),
 
   // ── Observer — 背景記憶壓縮 ──
 

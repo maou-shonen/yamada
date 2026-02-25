@@ -17,7 +17,8 @@ import { createTestConfig } from '../helpers/config.ts'
 // ─── 直接 import 真實模組（無 mock）───
 
 const { openGroupDb, GroupDbManager } = await import('../../storage/db')
-const { initVectorTable, insertVector, searchSimilar } = await import('../../storage/embedding')
+const { initChunkVectorTable, insertChunkVector, searchSimilarChunks } = await import('../../storage/embedding')
+const { saveChunk } = await import('../../storage/chunks')
 const { saveMessage, getRecentMessages } = await import('../../storage/messages')
 const { getGroupSummary, upsertGroupSummary } = await import('../../storage/summaries')
 const { shouldRun } = await import('../../lib/observer')
@@ -60,8 +61,8 @@ describe('E2E 冒煙測試', () => {
   test('DB 完整性：openGroupDb 建立所有 tables + sqlite-vec virtual table 存在', async () => {
     const { sqlite, db } = openGroupDb(tmpDir, 'group-e2e')
 
-    // 初始化 sqlite-vec virtual table（內部呼叫 sqliteVec.load）
-    initVectorTable(sqlite, 1536)
+    // 初始化 chunk_vectors virtual table（內部呼叫 sqliteVec.load）
+    initChunkVectorTable(sqlite, 1536)
 
     // 驗證核心 tables 存在
     const tables = sqlite
@@ -74,7 +75,7 @@ describe('E2E 冒煙測試', () => {
 
     // 驗證 sqlite-vec virtual table 存在
     const vtables = sqlite
-      .prepare('SELECT name FROM sqlite_master WHERE type=\'table\' AND name LIKE \'message_vectors%\'')
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'chunk_vectors%'")
       .all() as { name: string }[]
     expect(vtables.length).toBeGreaterThan(0)
 
@@ -103,7 +104,7 @@ describe('E2E 冒煙測試', () => {
   // ─── 場景 3: 訊息存取完整週期 — save → get → embedding → search ───
   test('訊息存取完整週期：save → get → embedding → search 結果一致', async () => {
     const { sqlite, db } = openGroupDb(tmpDir, 'group-a')
-    initVectorTable(sqlite, 1536)
+    initChunkVectorTable(sqlite, 1536)
 
     // 存入訊息
     const msg = {
@@ -124,17 +125,26 @@ describe('E2E 冒煙測試', () => {
     expect(msgs.length).toBe(1)
     expect(msgs[0].content).toBe('測試訊息內容')
 
-    // 取得訊息的 integer id（用於向量插入）
+    // 取得訊息的 integer id（用於 chunk 建立）
     const messageId = msgs[0].id
+    const ts = msgs[0].timestamp
 
-    // 插入向量（mock embed 回傳固定向量）
+    // 建立 chunk 記錄（用於 chunk-based embedding）
+    const chunkId = saveChunk(db, {
+      content: '測試訊息內容',
+      messageIds: [messageId],
+      startTimestamp: ts,
+      endTimestamp: ts,
+    })
+
+    // 插入 chunk 向量（固定向量，繞過 AI 呼叫）
     const embedding: number[] = Array.from({ length: 1536 }, () => 0.1)
-    insertVector(sqlite, messageId, embedding)
+    insertChunkVector(sqlite, chunkId, embedding)
 
     // 語義搜尋（threshold=2.0 放寬，確保同向量能找到）
-    const results = searchSimilar(sqlite, embedding, 5, 2.0)
+    const results = searchSimilarChunks(sqlite, embedding, 5, 2.0)
     expect(results.length).toBeGreaterThan(0)
-    expect(results[0].messageId).toBe(messageId)
+    expect(results[0].chunkId).toBe(chunkId)
 
     sqlite.close()
   })

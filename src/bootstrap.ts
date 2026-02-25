@@ -7,7 +7,6 @@ import { log } from './logger'
 import { createScheduler as defaultCreateScheduler } from './scheduler/index'
 import { upsertTrigger } from './scheduler/trigger-store'
 import { GroupDbManager } from './storage/db'
-import { initVectorTable } from './storage/embedding'
 import { closeMainDb, openMainDb } from './storage/main-db'
 
 const routerLog = log.withPrefix('[Router]')
@@ -66,11 +65,6 @@ export async function bootstrap(config: Config, options?: BootstrapOptions): Pro
 
   function createAgent(groupId: string): Agent {
     const { db, sqlite: sqliteDb } = manager.getOrCreate(groupId)
-
-    // 僅在 embedding 啟用時初始化 sqlite-vec virtual table
-    if (config.embeddingEnabled) {
-      initVectorTable(sqliteDb, config.EMBEDDING_DIMENSIONS)
-    }
 
     const agent = new Agent({
       groupId,

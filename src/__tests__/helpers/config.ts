@@ -42,6 +42,7 @@ export function createTestConfig(overrides: Partial<Config> = {}): Config {
     CONTEXT_SEMANTIC_THRESHOLD: 0.7,
     CONTEXT_RECENT_MESSAGE_COUNT: 20,
     CONTEXT_TOKEN_ESTIMATE_RATIO: 3,
+    CHUNK_TOKEN_LIMIT: 500,
 
     // ── Observer ──
     OBSERVER_MESSAGE_THRESHOLD: 50,
