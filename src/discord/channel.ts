@@ -187,6 +187,7 @@ export class DiscordChannel implements PlatformChannel {
       platform: 'discord',
       isBot: false,
       isMention,
+      replyToExternalId: message.reference?.messageId,
       raw: message,
     }
 

@@ -16,6 +16,7 @@ interface MockMessage {
   stickers: { size: number }
   mentions: { users: { has: (id: string) => boolean }, everyone: boolean }
   createdAt: Date
+  reference?: { messageId?: string } | null
 }
 
 // ─── Mock discord.js Client ──────────────────────────────────────
@@ -80,6 +81,8 @@ mock.module('discord.js', () => ({
   Client: MockClient,
   Events: { ClientReady: 'ready', MessageCreate: 'messageCreate' },
   GatewayIntentBits: { Guilds: 1, GuildMessages: 2, MessageContent: 4 },
+  // ChannelType.GuildText = 0 (discord.js 실제 값과 동일)
+  ChannelType: { GuildText: 0 },
 }))
 
 // 在 mock.module 之後才 import，確保使用 mock 版本
@@ -107,6 +110,7 @@ function createMockMessage(overrides: Partial<MockMessage> = {}): MockMessage {
     stickers: { size: 0 },
     mentions: { users: { has: () => false }, everyone: false },
     createdAt: new Date('2026-01-01T00:00:00Z'),
+    reference: undefined,
     ...overrides,
   }
 }
@@ -244,7 +248,21 @@ describe('DiscordChannel', () => {
       emitMessageCreate(mockMsg)
       expect(receivedMessages[0].raw).toBe(mockMsg)
     })
-  })
+
+    test('reply 메시지 → replyToExternalId 설정됨', () => {
+      emitMessageCreate(createMockMessage({
+        reference: { messageId: 'reply-target-123' },
+      }))
+      expect(receivedMessages).toHaveLength(1)
+      expect(receivedMessages[0].replyToExternalId).toBe('reply-target-123')
+    })
+
+    test('일반 메시지 → replyToExternalId undefined', () => {
+      emitMessageCreate(createMockMessage({ reference: undefined }))
+      expect(receivedMessages).toHaveLength(1)
+      expect(receivedMessages[0].replyToExternalId).toBeUndefined()
+    })
+  })  // describe('MessageCreate 事件處理') end
 
   describe('groupIdMode', () => {
     test('guild mode：groupId 為 guild.id', () => {

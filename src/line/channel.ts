@@ -21,6 +21,7 @@ interface LineMessageEvent {
     type: string
     id: string
     text?: string
+    quotedMessageId?: string
     mention?: {
       mentionees: Array<{
         type: string
@@ -248,6 +249,7 @@ export class LineChannel implements PlatformChannel {
       isBot: false, // LINE webhook 不會送 bot 自己的訊息
       isMention,
       raw: event,
+      replyToExternalId: event.message.quotedMessageId,
     }
 
     this.onMessage(unifiedMessage)

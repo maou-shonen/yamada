@@ -57,6 +57,7 @@ function createGroupMessageEvent(overrides?: {
   messageId?: string
   replyToken?: string
   mention?: { mentionees: Array<{ type: string, userId?: string }> }
+  quotedMessageId?: string
 }) {
   return {
     type: 'message',
@@ -71,6 +72,7 @@ function createGroupMessageEvent(overrides?: {
       id: overrides?.messageId ?? 'msg-001',
       text: overrides?.text ?? 'Hello',
       ...(overrides?.mention ? { mention: overrides.mention } : {}),
+      ...(overrides?.quotedMessageId ? { quotedMessageId: overrides.quotedMessageId } : {}),
     },
     timestamp: Date.now(),
   }
@@ -367,6 +369,41 @@ describe('LineChannel', () => {
 
       expect(received[0].isMention).toBe(false)
     })
+
+    test('LINE 인용 메시지 → replyToExternalId 설정됨', async () => {
+      await channel.start()
+      const mockClient = createMockClient()
+      injectMockClient(channel, mockClient)
+      const port = (channel as unknown as { server: { port: number } }).server.port
+
+      const received: UnifiedMessage[] = []
+      channel.onMessage = msg => received.push(msg)
+
+      const event = createGroupMessageEvent({ quotedMessageId: 'quoted-456' })
+      await sendWebhook(port, { events: [event] }, config.LINE_CHANNEL_SECRET!)
+      await new Promise(r => setTimeout(r, 50))
+
+      expect(received).toHaveLength(1)
+      expect(received[0].replyToExternalId).toBe('quoted-456')
+    })
+
+    test('LINE 일반 메시지 → replyToExternalId undefined', async () => {
+      await channel.start()
+      const mockClient = createMockClient()
+      injectMockClient(channel, mockClient)
+      const port = (channel as unknown as { server: { port: number } }).server.port
+
+      const received: UnifiedMessage[] = []
+      channel.onMessage = msg => received.push(msg)
+
+      const event = createGroupMessageEvent()
+      await sendWebhook(port, { events: [event] }, config.LINE_CHANNEL_SECRET!)
+      await new Promise(r => setTimeout(r, 50))
+
+      expect(received).toHaveLength(1)
+      expect(received[0].replyToExternalId).toBeUndefined()
+    })
+
   })
 
   describe('DM 私訊處理', () => {
