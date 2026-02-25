@@ -3,10 +3,9 @@ import type { Database } from 'bun:sqlite'
 import type { Config } from '../config/index.ts'
 import type { DB } from '../storage/db'
 import type { StoredMessage } from '../types'
-import { inArray } from 'drizzle-orm'
 import { log } from '../logger'
-import { embedText, searchSimilar } from '../storage/embedding'
-import * as schema from '../storage/schema'
+import { embedText, searchSimilarChunks } from '../storage/embedding'
+import { getChunkContents } from '../storage/chunks'
 import { getGroupSummary, getUserSummariesForGroup } from '../storage/summaries'
 
 const contextLog = log.withPrefix('[Context]')
@@ -15,14 +14,16 @@ export interface ContextDeps {
   getUserSummariesForGroup: typeof getUserSummariesForGroup
   getGroupSummary: typeof getGroupSummary
   embedText: typeof embedText
-  searchSimilar: typeof searchSimilar
+  searchSimilarChunks: typeof searchSimilarChunks
+  getChunkContents: typeof getChunkContents
 }
 
 const defaultDeps: ContextDeps = {
   getUserSummariesForGroup,
   getGroupSummary,
   embedText,
-  searchSimilar,
+  searchSimilarChunks,
+  getChunkContents,
 }
 
 export interface AssembleContextParams {
@@ -83,7 +84,7 @@ export async function assembleContext(params: AssembleContextParams): Promise<Mo
       try {
         contextLog.withMetadata({ query: lastNonBot.content.slice(0, 60) }).debug('Running semantic search')
         const embedding = await deps.embedText(lastNonBot.content, config)
-        const similar = deps.searchSimilar(
+        const similar = deps.searchSimilarChunks(
           sqliteDb,
           embedding,
           config.CONTEXT_SEMANTIC_TOP_K,
@@ -91,17 +92,8 @@ export async function assembleContext(params: AssembleContextParams): Promise<Mo
         )
         contextLog.withMetadata({ resultsCount: similar.length }).debug('Semantic search results')
         if (similar.length > 0) {
-          // 只查詢語義搜尋命中的 messageId，避免載入不必要的訊息
-          const messageIds = similar.map(s => s.messageId)
-          const matched = db
-            .select({ id: schema.messages.id, content: schema.messages.content })
-            .from(schema.messages)
-            .where(inArray(schema.messages.id, messageIds))
-            .all()
-          const msgMap = new Map(matched.map(m => [m.id, m.content]))
-          const contents = similar
-            .map(s => msgMap.get(s.messageId))
-            .filter(Boolean) as string[]
+          const chunkIds = similar.map(s => s.chunkId)
+          const contents = deps.getChunkContents(db, chunkIds)
           if (contents.length > 0) {
             semanticSection = `<related_history>\n${contents.join('\n')}\n</related_history>`
           }

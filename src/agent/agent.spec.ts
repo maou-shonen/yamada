@@ -61,7 +61,7 @@ function createFakeServices() {
   const deliverReplyMock = mock(async () => {})
   const deliverReactionMock = mock(async () => {})
   const runObserverMock = mock(async () => {})
-  const processNewMessagesMock = mock(async () => {})
+  const processNewChunksMock = mock(async () => {})
   const recordActivityMock = mock(() => {})
 
   const services: AgentServices = {
@@ -73,7 +73,7 @@ function createFakeServices() {
     deliverReply: deliverReplyMock as unknown as AgentServices['deliverReply'],
     deliverReaction: deliverReactionMock as unknown as AgentServices['deliverReaction'],
     runObserver: runObserverMock as unknown as AgentServices['runObserver'],
-    processNewMessages: processNewMessagesMock as unknown as AgentServices['processNewMessages'],
+    processNewChunks: processNewChunksMock as unknown as AgentServices['processNewChunks'],
     recordActivity: recordActivityMock as unknown as AgentServices['recordActivity'],
   }
 
@@ -88,7 +88,7 @@ function createFakeServices() {
       deliverReplyMock,
       deliverReactionMock,
       runObserverMock,
-      processNewMessagesMock,
+      processNewChunksMock,
       recordActivityMock,
     },
   }
@@ -374,10 +374,10 @@ describe('Agent', () => {
     await agent.processTriggeredMessages('discord')
 
     expect(mocks.runObserverMock.mock.calls.length).toBe(1)
-    expect(mocks.processNewMessagesMock.mock.calls.length).toBe(1)
+    expect(mocks.processNewChunksMock.mock.calls.length).toBe(1)
   })
 
-  test('embeddingEnabled = false → 不呼叫 processNewMessages', async () => {
+  test('embeddingEnabled = false → 不呼叫 processNewChunks', async () => {
     const { sqlite, db } = setupTestDb()
     const { services, mocks } = createFakeServices()
     const agent = new Agent({
@@ -392,7 +392,7 @@ describe('Agent', () => {
     await agent.processTriggeredMessages('discord')
 
     expect(mocks.runObserverMock.mock.calls.length).toBe(1)
-    expect(mocks.processNewMessagesMock.mock.calls.length).toBe(0)
+    expect(mocks.processNewChunksMock.mock.calls.length).toBe(0)
   })
 
   test('無對應 channel → reply 不 deliver 但仍 saveBotMessage', async () => {

@@ -7,7 +7,7 @@ import { deliverReaction, deliverReply } from '../lib/delivery'
 import { generateReply } from '../lib/generator'
 import { runObserver } from '../lib/observer'
 import { log } from '../logger'
-import { processNewMessages } from '../storage/embedding'
+import { processNewChunks } from '../storage/embedding'
 import { getRecentMessages, saveBotMessage, saveMessage } from '../storage/messages'
 import { recordActivity } from '../storage/user-stats'
 import { containsUrl, STICKER_CONTENT } from '../utils'
@@ -21,7 +21,7 @@ export interface AgentServices {
   deliverReply: typeof deliverReply
   deliverReaction: typeof deliverReaction
   runObserver: typeof runObserver
-  processNewMessages: typeof processNewMessages
+  processNewChunks: typeof processNewChunks
   recordActivity: typeof recordActivity
 }
 
@@ -34,7 +34,7 @@ const defaultServices: AgentServices = {
   deliverReply,
   deliverReaction,
   runObserver,
-  processNewMessages,
+  processNewChunks,
   recordActivity,
 }
 
@@ -237,7 +237,7 @@ export class Agent {
     // WHY fire-and-forget：向量索引降級可接受，回覆投遞不能失敗
     if (this.config.embeddingEnabled) {
       this.log.debug('Triggering Embedding (background)...')
-      this.services.processNewMessages(this.sqliteDb, recentMessages, this.config).catch((err) => {
+      this.services.processNewChunks(this.sqliteDb, this.db, this.config).catch((err) => {
         this.log.withError(err).error('Embedding error')
       })
     }

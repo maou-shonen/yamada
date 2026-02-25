@@ -77,7 +77,7 @@ function createTestServices(overrides: Partial<AgentServices> = {}): AgentServic
     deliverReply,
     deliverReaction,
     runObserver: (mock(async () => {}) as unknown) as AgentServices['runObserver'],
-    processNewMessages: (mock(async () => {}) as unknown) as AgentServices['processNewMessages'],
+    processNewChunks: (mock(async () => {}) as unknown) as AgentServices['processNewChunks'],
     recordActivity: (mock(() => {}) as unknown) as AgentServices['recordActivity'],
     ...overrides,
   }

@@ -41,7 +41,8 @@ function createFakeDeps(): ContextDeps {
     getUserSummariesForGroup,
     getGroupSummary,
     embedText: (async () => [0.1, 0.2, 0.3]) as unknown as ContextDeps['embedText'],
-    searchSimilar: (() => []) as unknown as ContextDeps['searchSimilar'],
+    searchSimilarChunks: (() => []) as unknown as ContextDeps['searchSimilarChunks'],
+    getChunkContents: (() => []) as unknown as ContextDeps['getChunkContents'],
   }
 }
 
