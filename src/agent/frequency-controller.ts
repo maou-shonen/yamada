@@ -1,5 +1,6 @@
 import type { Config } from '../config/index.ts'
 import type { DB } from '../storage/db'
+import { log } from '../logger'
 import {
   countActiveMembers,
   countMessagesSince,
@@ -7,15 +8,15 @@ import {
   saveFrequencyState,
 } from '../storage/frequency-stats'
 import {
+  calculateDecay,
+  calculateShare,
+  calculateTarget,
+  computeProbability,
   P_MAX,
   P_MIN,
   PRIOR_ALPHA,
   PRIOR_BETA,
   SIGMOID_BETA,
-  calculateDecay,
-  calculateShare,
-  calculateTarget,
-  computeProbability,
 } from './frequency-math'
 
 export interface FrequencyMetadata {
@@ -158,11 +159,9 @@ export function checkFrequency(
     reason: shouldRespond ? 'pass' : 'probability_gate',
   }
 
-  console.log('frequency_decision', {
-    shouldRespond,
-    probability,
-    ...metadata,
-  })
+  log
+    .withMetadata({ shouldRespond, probability, ...metadata })
+    .debug('frequency_decision')
 
   return {
     shouldRespond,

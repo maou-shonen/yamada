@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import { describe, expect, test } from 'bun:test'
 
 import { createTestConfig } from '../__tests__/helpers/config.ts'
 import { setupTestDb } from '../__tests__/helpers/setup-db'
@@ -7,15 +7,6 @@ import { P_MAX, P_MIN } from './frequency-math'
 import { checkFrequency } from './frequency-controller'
 
 describe('checkFrequency', () => {
-  let originalConsoleLog: typeof console.log
-
-  beforeEach(() => {
-    originalConsoleLog = console.log
-  })
-
-  afterEach(() => {
-    console.log = originalConsoleLog
-  })
 
   test('mention bypass：isMention=true 時直接通過', () => {
     const { db } = setupTestDb()
@@ -120,31 +111,23 @@ describe('checkFrequency', () => {
     })
   })
 
-  test('結構化 log：輸出 frequency_decision 與完整 metadata', () => {
+  test('結構化 log：metadata 包含所有必要欄位', () => {
     const { db } = setupTestDb()
-    const logMock = mock(() => {})
-    console.log = logMock
 
-    checkFrequency(db, createTestConfig(), false, {
+    const result = checkFrequency(db, createTestConfig(), false, {
       now: () => 1_700_000_000_000,
       random: () => 0.2,
       countActiveMembers: () => 2,
     })
 
-    expect(logMock).toHaveBeenCalledTimes(1)
-    expect(logMock).toHaveBeenCalledWith(
-      'frequency_decision',
-      expect.objectContaining({
-        shouldRespond: expect.any(Boolean),
-        probability: expect.any(Number),
-        emaLongShare: expect.any(Number),
-        emaShortShare: expect.any(Number),
-        target: expect.any(Number),
-        activeMembers: expect.any(Number),
-        rng: expect.any(Number),
-        isMention: false,
-        reason: expect.any(String),
-      }),
-    )
+    expect(result.metadata).toMatchObject({
+      emaLongShare: expect.any(Number),
+      emaShortShare: expect.any(Number),
+      target: expect.any(Number),
+      activeMembers: expect.any(Number),
+      rng: 0.2,
+      isMention: false,
+      reason: expect.any(String),
+    })
   })
 })
