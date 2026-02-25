@@ -13,12 +13,24 @@ export function setupTables(sqlite: Database): void {
       user_id TEXT NOT NULL,
       content TEXT NOT NULL,
       is_bot INTEGER NOT NULL DEFAULT 0,
-      timestamp INTEGER NOT NULL
+      timestamp INTEGER NOT NULL,
+      reply_to_external_id TEXT
     )
   `)
   sqlite.exec(`
     CREATE INDEX IF NOT EXISTS messages_timestamp_idx ON messages(timestamp)
   `)
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS messages_external_id_idx ON messages(external_id)`)
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS chunks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      content TEXT NOT NULL,
+      message_ids TEXT NOT NULL,
+      start_timestamp INTEGER NOT NULL,
+      end_timestamp INTEGER NOT NULL
+    )
+  `)
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS chunks_end_timestamp_idx ON chunks(end_timestamp)`)
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS user_summaries (
       id TEXT PRIMARY KEY,

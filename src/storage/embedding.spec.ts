@@ -27,6 +27,7 @@ function makeMsg(id: number, content: string) {
     userId: 'u1',
     isBot: false,
     timestamp: Date.now(),
+    replyToExternalId: null,
   }
 }
 

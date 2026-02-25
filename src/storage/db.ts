@@ -99,6 +99,23 @@ function initSchema(sqlite: Database): void {
       PRIMARY KEY (user_id, date)
     )
   `)
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS messages_external_id_idx ON messages(external_id)`)
+  try {
+    sqlite.exec(`ALTER TABLE messages ADD COLUMN reply_to_external_id TEXT`)
+  }
+  catch {
+    // 已存在時略過（相容舊有 DB）
+  }
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS chunks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      content TEXT NOT NULL,
+      message_ids TEXT NOT NULL,
+      start_timestamp INTEGER NOT NULL,
+      end_timestamp INTEGER NOT NULL
+    )
+  `)
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS chunks_end_timestamp_idx ON chunks(end_timestamp)`)
 }
 
 /**

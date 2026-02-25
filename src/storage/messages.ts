@@ -10,6 +10,7 @@ export function saveMessage(db: DB, message: UnifiedMessage): void {
     content: message.content,
     isBot: message.isBot,
     timestamp: message.timestamp.getTime(),
+    replyToExternalId: message.replyToExternalId ?? null,
   }).run()
 }
 

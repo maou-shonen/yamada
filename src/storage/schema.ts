@@ -16,9 +16,11 @@ export const messages = sqliteTable(
     content: text('content').notNull(),
     isBot: integer('is_bot', { mode: 'boolean' }).notNull().default(false),
     timestamp: integer('timestamp').notNull(),
+    replyToExternalId: text('reply_to_external_id'),
   },
   table => ({
     timestampIdx: index('messages_timestamp_idx').on(table.timestamp),
+    externalIdIdx: index('messages_external_id_idx').on(table.externalId),
   }),
 )
 
@@ -70,5 +72,24 @@ export const userStats = sqliteTable(
   },
   table => ({
     pk: primaryKey({ columns: [table.userId, table.date] }),
+  }),
+)
+
+/**
+ * 語義搜尋用的文字 chunk 表
+ * messageIds: JSON array 字串（如 '[1,2,3]'），記錄此 chunk 涵蓋的訊息 id
+ * startTimestamp / endTimestamp: chunk 涵蓋的時間範圍（Unix ms）
+ */
+export const chunks = sqliteTable(
+  'chunks',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    content: text('content').notNull(),
+    messageIds: text('message_ids').notNull(), // JSON array as TEXT
+    startTimestamp: integer('start_timestamp').notNull(),
+    endTimestamp: integer('end_timestamp').notNull(),
+  },
+  table => ({
+    endTimestampIdx: index('chunks_end_timestamp_idx').on(table.endTimestamp),
   }),
 )

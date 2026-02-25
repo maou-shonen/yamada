@@ -1,3 +1,5 @@
+import * as schema from './schema'
+
 import type { UnifiedMessage } from '../types'
 import { expect, test } from 'bun:test'
 import { setupTestDb } from '../__tests__/helpers/setup-db'
@@ -247,4 +249,57 @@ test('時間戳精度 - 毫秒級別', () => {
 
   const stored = getRecentMessages(db, 10)
   expect(stored[0].timestamp).toBe(now.getTime())
+})
+
+test('saveMessage - replyToExternalId 있을 때 DB에 정확히 저장됨', () => {
+  const { db } = makeDb()
+  const now = new Date()
+
+  const message: UnifiedMessage = {
+    id: 'msg-1',
+    groupId: 'g1',
+    userId: 'u1',
+    userName: 'User1',
+    content: 'hello',
+    timestamp: now,
+    platform: 'discord',
+    isBot: false,
+    isMention: false,
+    replyToExternalId: 'original-id',
+  }
+
+  saveMessage(db, message)
+
+  const rows = db
+    .select()
+    .from(schema.messages)
+    .all()
+  const row = rows.find(r => r.externalId === 'msg-1')
+  expect(row?.replyToExternalId).toBe('original-id')
+})
+
+test('saveMessage - replyToExternalId 없을 때 null로 저장됨', () => {
+  const { db } = makeDb()
+  const now = new Date()
+
+  const message: UnifiedMessage = {
+    id: 'msg-2',
+    groupId: 'g1',
+    userId: 'u1',
+    userName: 'User1',
+    content: 'hello',
+    timestamp: now,
+    platform: 'discord',
+    isBot: false,
+    isMention: false,
+  }
+
+  saveMessage(db, message)
+
+  const rows = db
+    .select()
+    .from(schema.messages)
+    .all()
+  const row = rows.find(r => r.externalId === 'msg-2')
+  expect(row?.replyToExternalId).toBeNull()
 })

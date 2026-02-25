@@ -31,6 +31,7 @@ function makeMessage(overrides: Partial<StoredMessage> = {}): StoredMessage {
     content: 'Hello world',
     isBot: false,
     timestamp: Date.now(),
+    replyToExternalId: null,
     ...overrides,
   }
 }

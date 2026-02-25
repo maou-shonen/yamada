@@ -304,7 +304,7 @@ describe('Agent', () => {
     const { services, mocks } = createFakeServices()
     // 讓 getRecentMessages 回傳有 externalId 的訊息
     mocks.getRecentMessagesMock.mockImplementation(() => [
-      { id: 1, externalId: 'msg-ext-1', userId: 'u1', content: 'hi', isBot: false, timestamp: Date.now() },
+      { id: 1, externalId: 'msg-ext-1', userId: 'u1', content: 'hi', isBot: false, timestamp: Date.now(), replyToExternalId: null },
     ])
     mocks.generateReplyMock.mockImplementation(async () => ({
       actions: [{ type: 'reaction' as const, emoji: '👍' }],
@@ -333,7 +333,7 @@ describe('Agent', () => {
     const { sqlite, db } = setupTestDb()
     const { services, mocks } = createFakeServices()
     mocks.getRecentMessagesMock.mockImplementation(() => [
-      { id: 1, externalId: 'msg-ext-1', userId: 'u1', content: 'hi', isBot: false, timestamp: Date.now() },
+      { id: 1, externalId: 'msg-ext-1', userId: 'u1', content: 'hi', isBot: false, timestamp: Date.now(), replyToExternalId: null },
     ])
     mocks.generateReplyMock.mockImplementation(async () => ({
       actions: [

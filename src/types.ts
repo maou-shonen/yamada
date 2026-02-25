@@ -14,6 +14,7 @@ export interface UnifiedMessage {
   isBot: boolean
   isMention: boolean
   raw?: unknown
+  replyToExternalId?: string
 }
 
 /** 平台通道介面（Discord / LINE 均需實作） */
@@ -42,4 +43,5 @@ export interface StoredMessage {
   content: string
   isBot: boolean
   timestamp: number
+  replyToExternalId: string | null
 }
