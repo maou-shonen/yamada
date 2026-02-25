@@ -36,9 +36,10 @@ export interface AssembleContextParams {
 /**
  * 組裝 AI 對話 context。
  *
- * Why: 順序很重要——SOUL 是 bot 的身份基礎，群組摘要是共享背景，
- * 用戶摘要是個人記憶（影響人格一致性），語義搜尋是補充檢索。
- * 近期訊息最後加入，讓 LLM 看到最新的對話脈絡。
+ * System prompt 各區塊以 XML 標籤分隔，避免 LLM 混淆區塊邊界。
+ * 優先序：SOUL > 群組摘要 > 用戶資料 > 相關歷史。
+ * 近期訊息轉為 user/assistant 交替的 chat messages——
+ * 連續的非 bot 訊息合併為單一 user message，維持正確的對話輪次結構。
  */
 export async function assembleContext(params: AssembleContextParams): Promise<ModelMessage[]> {
   const { recentMessages, config, db, sqliteDb } = params
@@ -48,12 +49,14 @@ export async function assembleContext(params: AssembleContextParams): Promise<Mo
 
   const ratio = config.CONTEXT_TOKEN_ESTIMATE_RATIO
 
-  const soulSection = config.SOUL
+  // ── 各區塊收集 ──
+
+  const soulSection = `<soul>\n${config.SOUL}\n</soul>`
 
   let groupSummarySection = ''
   const groupSummary = await deps.getGroupSummary(db)
   if (groupSummary) {
-    groupSummarySection = `\n## 群組摘要\n${groupSummary}`
+    groupSummarySection = `<group_summary>\n${groupSummary}\n</group_summary>`
     contextLog.withMetadata({ groupSummaryLength: groupSummary.length }).debug('Group summary loaded')
   }
   else {
@@ -68,7 +71,7 @@ export async function assembleContext(params: AssembleContextParams): Promise<Mo
   let userSummarySection = ''
   if (userSummaryMap.size > 0) {
     const lines = [...userSummaryMap.entries()].map(([uid, summary]) => `${uid}: ${summary}`)
-    userSummarySection = `\n## 用戶資料\n${lines.join('\n')}`
+    userSummarySection = `<user_profiles>\n${lines.join('\n')}\n</user_profiles>`
     contextLog.withMetadata({ userCount: userSummaryMap.size }).debug('User summaries loaded')
   }
 
@@ -100,7 +103,7 @@ export async function assembleContext(params: AssembleContextParams): Promise<Mo
             .map(s => msgMap.get(s.messageId))
             .filter(Boolean) as string[]
           if (contents.length > 0) {
-            semanticSection = `\n## 相關歷史\n${contents.join('\n')}`
+            semanticSection = `<related_history>\n${contents.join('\n')}\n</related_history>`
           }
         }
       }
@@ -111,12 +114,10 @@ export async function assembleContext(params: AssembleContextParams): Promise<Mo
     }
   }
 
-  /**
-   * Token 預算裁剪：依優先序逐步移除低優先區塊。
-   * 裁剪順序：semantic → userSummary。
-   * Why: 語義搜尋是「錦上添花」的歷史回顧，user summary 對人格一致性更關鍵，
-   * 而 SOUL 和 group summary 是不可裁剪的核心。
-   */
+  // ── Token 預算裁剪 ──
+  // 裁剪順序：semantic → userSummary。
+  // 語義搜尋是「錦上添花」的歷史回顧，user summary 對人格一致性更關鍵，
+  // 而 SOUL 和 group summary 是不可裁剪的核心。
   const maxTokens = config.CONTEXT_MAX_TOKENS
   const estimateTokens = (parts: string[]) => Math.ceil(parts.filter(Boolean).join('').length / ratio)
   let trimmedSemantic = false
@@ -131,7 +132,7 @@ export async function assembleContext(params: AssembleContextParams): Promise<Mo
     trimmedUserSummaries = true
   }
 
-  const systemPrompt = [soulSection, groupSummarySection, userSummarySection, semanticSection].filter(Boolean).join('')
+  const systemPrompt = [soulSection, groupSummarySection, userSummarySection, semanticSection].filter(Boolean).join('\n\n')
 
   contextLog
     .withMetadata({
@@ -145,20 +146,48 @@ export async function assembleContext(params: AssembleContextParams): Promise<Mo
     })
     .info('Context assembly complete')
 
-  /**
-   * Caveat: recentMessages 來自 DB 的 DESC 排序（最新在前），
-   * 但 LLM 需要時間正序（最舊在前），因此做 reverse。
-   */
-  const ordered = [...recentMessages].reverse()
-  const chatMessages: ModelMessage[] = ordered.map((msg) => {
-    if (msg.isBot) {
-      return { role: 'assistant' as const, content: msg.content }
-    }
-    return { role: 'user' as const, content: `${msg.userId}: ${msg.content}` }
-  })
+  // ── Chat messages：合併連續同 role 訊息 ──
+  // recentMessages 來自 DB DESC 排序（最新在前），LLM 需要時間正序，先 reverse。
+  // 連續的非 bot 訊息合併為單一 user message，維持 user/assistant 交替結構。
+  const chatMessages = buildChatMessages([...recentMessages].reverse())
 
   return [
     { role: 'system', content: systemPrompt },
     ...chatMessages,
   ]
+}
+
+/**
+ * 將時間正序的訊息列表轉為 user/assistant 交替的 ModelMessage[]。
+ *
+ * 規則：
+ * - bot 訊息 → assistant role，各自獨立一則
+ * - 連續的非 bot 訊息 → 合併為單一 user message（以換行分隔，每行 `{userId}: {content}`）
+ *
+ * WHY 合併：群聊中多人連續發言是常態，若每則都獨立為 user role，
+ * 會產生連續多個 user message，不符合 LLM 預期的 user/assistant 交替格式。
+ */
+export function buildChatMessages(ordered: StoredMessage[]): ModelMessage[] {
+  const result: ModelMessage[] = []
+  let userBuffer: string[] = []
+
+  const flushUserBuffer = () => {
+    if (userBuffer.length > 0) {
+      result.push({ role: 'user' as const, content: userBuffer.join('\n') })
+      userBuffer = []
+    }
+  }
+
+  for (const msg of ordered) {
+    if (msg.isBot) {
+      flushUserBuffer()
+      result.push({ role: 'assistant' as const, content: msg.content })
+    }
+    else {
+      userBuffer.push(`${msg.userId}: ${msg.content}`)
+    }
+  }
+  flushUserBuffer()
+
+  return result
 }
