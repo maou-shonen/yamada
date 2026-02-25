@@ -3,7 +3,6 @@ import type { DB } from '../storage/db'
 import { log } from '../logger'
 import {
   countActiveMembers,
-  countMessagesSince,
   getFrequencyState,
   saveFrequencyState,
 } from '../storage/frequency-stats'
@@ -38,7 +37,6 @@ export interface FrequencyDecision {
 export interface FrequencyControllerDeps {
   getFrequencyState: typeof getFrequencyState
   saveFrequencyState: typeof saveFrequencyState
-  countMessagesSince: typeof countMessagesSince
   countActiveMembers: typeof countActiveMembers
   now: () => number
   random: () => number
@@ -47,7 +45,6 @@ export interface FrequencyControllerDeps {
 const defaultDeps: FrequencyControllerDeps = {
   getFrequencyState,
   saveFrequencyState,
-  countMessagesSince,
   countActiveMembers,
   now: Date.now,
   random: Math.random,
