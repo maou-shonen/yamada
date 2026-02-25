@@ -116,6 +116,14 @@ function initSchema(sqlite: Database): void {
     )
   `)
   sqlite.exec(`CREATE INDEX IF NOT EXISTS chunks_end_timestamp_idx ON chunks(end_timestamp)`)
+  // 移除舊的 message_vectors 虛擬表（已由 chunk_vectors 取代）
+  // DROP TABLE IF EXISTS 對虛擬表同樣有效
+  try {
+    sqlite.exec(`DROP TABLE IF EXISTS message_vectors`)
+  }
+  catch {
+    // 若表不存在或已刪除，略過
+  }
 }
 
 /**

@@ -6,7 +6,7 @@
 
 - **每個群組 = 獨立 agent 生命週期**：每個群組擁有自己的 SQLite 檔案，包含 messages、summaries、vectors
 - **訊息無限期保留**：不刪除、不 GC、不 TTL
-- **Per-message embedding**：每則訊息都 embed（成本 ~$0.37/年/群組，無資訊損失）
+- **Chunk-based embedding**：訊息依 reply chain 分組後 embed（成本更低、語義更完整）
 - **共用設定全靠 env/config**：不需要共用 DB，只有 SOUL（人格 prompt）跨群組共用
 
 ### 為什麼 Per-Group？
@@ -29,12 +29,12 @@
 
 ### Embedding 策略比較
 
-|          | Per-message（採用） | Per-summary                  |
-| -------- | ------------------- | ---------------------------- |
-| API 成本 | $0.37/年/群組       | $4.42/年/群組（需 LLM 萃取） |
-| 資訊損失 | 無                  | 有（找不到具體某句話）       |
-| 搜尋粒度 | 可找到特定訊息      | 只能找到主題                 |
-| 向量數量 | 36.5 萬/年          | ~3.65 萬/年                  |
+|          | Per-message（舊）           | Chunk-based（採用）                    |
+| -------- | --------------------------- | -------------------------------------- |
+| API 成本 | $0.37/年/群組               | 更低（多則訊息合併為一個 chunk embed） |
+| 資訊損失 | 無                          | 極低（reply chain 保留對話脈絡）       |
+| 搜尋粒度 | 可找到特定訊息              | 可找到對話片段（reply chain 或連續訊息）|
+| 向量數量 | 36.5 萬/年                  | 更少（多則訊息合併）                   |
 
 ## Schema
 
@@ -47,9 +47,11 @@ CREATE TABLE messages (
   user_id TEXT NOT NULL,
   content TEXT NOT NULL,
   is_bot INTEGER NOT NULL DEFAULT 0,
-  timestamp INTEGER NOT NULL
+  timestamp INTEGER NOT NULL,
+  reply_to_external_id TEXT
 );
 CREATE INDEX messages_timestamp_idx ON messages(timestamp);
+CREATE INDEX messages_external_id_idx ON messages(external_id);
 ```
 
 - `id`：INTEGER PRIMARY KEY AUTOINCREMENT — SQLite 自動分配，同時作為 sqlite-vec 的 rowid（消除橋接表）
@@ -57,6 +59,25 @@ CREATE INDEX messages_timestamp_idx ON messages(timestamp);
 - 不需要 `group_id`：per-group DB 本身就是隔離單位
 - 不需要 `platform`：per-group DB 天然對應單一平台
 - 不需要 `created_at`：`timestamp` 已涵蓋所有時間查詢需求
+- `reply_to_external_id`：回覆目標的平台訊息 ID（Discord/LINE），用於 chunking 時追溯 reply chain
+
+### chunks
+
+```sql
+CREATE TABLE chunks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  content TEXT NOT NULL,
+  message_ids TEXT NOT NULL,
+  start_timestamp INTEGER NOT NULL,
+  end_timestamp INTEGER NOT NULL
+);
+CREATE INDEX chunks_end_timestamp_idx ON chunks(end_timestamp);
+```
+
+- `content`：chunk 的文字內容（多則訊息合併，格式 `{userId}: {content}`）
+- `message_ids`：JSON 陣列，記錄此 chunk 包含的所有 message id
+- `start_timestamp` / `end_timestamp`：chunk 的時間範圍
+- `end_timestamp` 索引：供 `processNewChunks` 查詢「上次處理到哪裡」
 
 ### user_summaries
 
@@ -83,16 +104,17 @@ CREATE TABLE group_summaries (
 - Per-group DB 中只有一筆記錄，`id` 固定為 `'singleton'`
 - `updated_at` 同時作為 Observer 的 watermark（計算「距上次壓縮以來的訊息數」）
 
-### message_vectors（sqlite-vec 虛擬表）
+### chunk_vectors（sqlite-vec 虛擬表）
 
 ```sql
-CREATE VIRTUAL TABLE message_vectors USING vec0(
+CREATE VIRTUAL TABLE chunk_vectors USING vec0(
   embedding float[1536]
 );
 ```
 
-- rowid 直接使用 `messages.id`（INTEGER PK），無需額外的橋接表
+- rowid 直接使用 `chunks.id`（INTEGER PK），無需額外的橋接表
 - 維度由 `EMBEDDING_DIMENSIONS` config 決定
+- 由 `initChunkVectorTable()` 在 embedding 模組初始化時建立（非 `initSchema()`）
 
 ## DB 檔案結構
 
@@ -112,10 +134,12 @@ data/groups/
 ### 向量搜尋流程
 
 ```
-message.id (INTEGER PK) → 直接作為 sqlite-vec rowid
-insertVector(db, messageId, embedding) → INSERT OR IGNORE
-searchSimilar(db, queryEmbedding, topK, threshold) → { messageId, distance }[]
-context.ts → WHERE messages.id IN (messageIds)
+messages → buildChunks() → ChunkInput[]
+saveChunk(db, chunk) → chunks.id (INTEGER PK) → 直接作為 sqlite-vec rowid
+insertChunkVector(db, chunkId, embedding) → INSERT（手動冪等）
+searchSimilarChunks(db, queryEmbedding, topK, threshold) → { chunkId, distance }[]
+getChunkContents(db, chunkIds) → string[]（chunk 文字內容）
+context.ts → <related_history> 區塊
 ```
 
 ## 資料遷移
