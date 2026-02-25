@@ -5,6 +5,7 @@ import type { AgentServices } from './index'
 import { describe, expect, mock, test } from 'bun:test'
 import { createTestConfig } from '../__tests__/helpers/config.ts'
 import { setupTestDb } from '../__tests__/helpers/setup-db'
+import { getFrequencyState } from '../storage/frequency-stats'
 import { Agent } from './index'
 
 function makeConfig(overrides: Partial<Config> = {}): Config {
@@ -63,6 +64,22 @@ function createFakeServices() {
   const runObserverMock = mock(async () => {})
   const processNewChunksMock = mock(async () => {})
   const recordActivityMock = mock(() => {})
+  const checkFrequencyMock = mock((...args: unknown[]) => {
+    const isMention = args[2] === true
+    return {
+      shouldRespond: true,
+      probability: 1,
+      metadata: {
+        emaLongShare: 0,
+        emaShortShare: 0,
+        target: 0.2,
+        activeMembers: 4,
+        rng: 0,
+        isMention,
+        reason: 'pass',
+      },
+    }
+  })
 
   const services: AgentServices = {
     saveMessage: saveMessageMock as unknown as AgentServices['saveMessage'],
@@ -75,6 +92,7 @@ function createFakeServices() {
     runObserver: runObserverMock as unknown as AgentServices['runObserver'],
     processNewChunks: processNewChunksMock as unknown as AgentServices['processNewChunks'],
     recordActivity: recordActivityMock as unknown as AgentServices['recordActivity'],
+    checkFrequency: checkFrequencyMock as unknown as AgentServices['checkFrequency'],
   }
 
   return {
@@ -90,6 +108,7 @@ function createFakeServices() {
       runObserverMock,
       processNewChunksMock,
       recordActivityMock,
+      checkFrequencyMock,
     },
   }
 }
@@ -252,6 +271,91 @@ describe('Agent', () => {
     expect(mocks.generateReplyMock.mock.calls.length).toBe(1)
     expect(mocks.deliverReplyMock.mock.calls.length).toBe(1)
     expect(mocks.saveBotMessageMock.mock.calls.length).toBe(1)
+  })
+
+  test('頻率控制拒絕時 LLM 不被呼叫', async () => {
+    const { sqlite, db } = setupTestDb()
+    const { services, mocks } = createFakeServices()
+    mocks.checkFrequencyMock.mockImplementation(() => ({
+      shouldRespond: false,
+      probability: 0.1,
+      metadata: {
+        emaLongShare: 0.8,
+        emaShortShare: 0.8,
+        target: 0.2,
+        activeMembers: 4,
+        rng: 0.9,
+        isMention: false,
+        reason: 'probability_gate',
+      },
+    }))
+
+    const agent = new Agent({
+      groupId: 'group1',
+      config: makeConfig(),
+      db,
+      sqliteDb: sqlite,
+      channels: new Map([['discord', makeChannel()]]),
+      services,
+    })
+
+    await agent.processTriggeredMessages('discord', false)
+
+    expect(mocks.generateReplyMock.mock.calls.length).toBe(0)
+  })
+
+  test('mention bypass 時會放行到 LLM', async () => {
+    const { sqlite, db } = setupTestDb()
+    const { services, mocks } = createFakeServices()
+    mocks.checkFrequencyMock.mockImplementation((...args: unknown[]) => {
+      const isMention = args[2] === true
+      return {
+        shouldRespond: isMention,
+        probability: isMention ? 1 : 0.1,
+        metadata: {
+          emaLongShare: 0.8,
+          emaShortShare: 0.8,
+          target: 0.2,
+          activeMembers: 4,
+          rng: 0.9,
+          isMention,
+          reason: isMention ? 'mention_bypass' : 'probability_gate',
+        },
+      }
+    })
+
+    const agent = new Agent({
+      groupId: 'group1',
+      config: makeConfig(),
+      db,
+      sqliteDb: sqlite,
+      channels: new Map([['discord', makeChannel()]]),
+      services,
+    })
+
+    await agent.processTriggeredMessages('discord', true)
+
+    expect(mocks.generateReplyMock.mock.calls.length).toBe(1)
+  })
+
+  test('reply 後 EMA 狀態已更新', async () => {
+    const { sqlite, db } = setupTestDb()
+    const { services } = createFakeServices()
+
+    const agent = new Agent({
+      groupId: 'group1',
+      config: makeConfig(),
+      db,
+      sqliteDb: sqlite,
+      channels: new Map([['discord', makeChannel()]]),
+      services,
+    })
+
+    await agent.processTriggeredMessages('discord', false)
+
+    const state = getFrequencyState(db)
+    expect(state).toBeDefined()
+    expect(state?.emaLongBot).toBeGreaterThan(0)
   })
 
   test('processTriggeredMessages → deliverReply 收到正確的 content 和 platform', async () => {

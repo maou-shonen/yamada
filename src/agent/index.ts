@@ -7,6 +7,9 @@ import { deliverReaction, deliverReply } from '../lib/delivery'
 import { generateReply } from '../lib/generator'
 import { runObserver } from '../lib/observer'
 import { log } from '../logger'
+import { checkFrequency } from './frequency-controller'
+import { calculateDecay, updateEma } from './frequency-math'
+import { getFrequencyState, saveFrequencyState } from '../storage/frequency-stats'
 import { processNewChunks } from '../storage/embedding'
 import { getRecentMessages, saveBotMessage, saveMessage } from '../storage/messages'
 import { recordActivity } from '../storage/user-stats'
@@ -23,6 +26,7 @@ export interface AgentServices {
   runObserver: typeof runObserver
   processNewChunks: typeof processNewChunks
   recordActivity: typeof recordActivity
+  checkFrequency: typeof checkFrequency
 }
 
 const defaultServices: AgentServices = {
@@ -36,6 +40,7 @@ const defaultServices: AgentServices = {
   runObserver,
   processNewChunks,
   recordActivity,
+  checkFrequency,
 }
 
 export interface AgentOptions {
@@ -154,6 +159,15 @@ export class Agent {
    * 執行完整 AI pipeline：getRecentMessages → assembleContext → generateReply → delivery → observer → embedding
    */
   private async runPipeline(platform: 'discord' | 'line', startTime: number, isMention: boolean): Promise<void> {
+    // 頻率控制：在 LLM pipeline 之前決定是否回應
+    const decision = this.services.checkFrequency(this.db, this.config, isMention)
+    if (!decision.shouldRespond) {
+      this.log
+        .withMetadata(decision.metadata)
+        .info('Frequency controller: skipping response')
+      return
+    }
+
     const recentMessages = this.services.getRecentMessages(this.db, this.config.CONTEXT_RECENT_MESSAGE_COUNT)
     this.log.withMetadata({ recentCount: recentMessages.length }).debug('Fetched recent messages')
 
@@ -203,6 +217,31 @@ export class Agent {
           }
 
           this.services.saveBotMessage(this.db, action.content, this.config.BOT_USER_ID)
+
+          // EMA 回饋：bot 實際發送 reply 時更新頻率狀態
+          try {
+            const now = Date.now()
+            const currentState = getFrequencyState(this.db)
+            const elapsed = currentState ? now - currentState.lastUpdatedAt : 0
+            const decayLong = elapsed > 0
+              ? calculateDecay(elapsed, this.config.FREQUENCY_LONG_HALFLIFE_HOURS * 60 * 60 * 1000)
+              : 0
+            const decayShort = elapsed > 0
+              ? calculateDecay(elapsed, this.config.FREQUENCY_SHORT_HALFLIFE_HOURS * 60 * 60 * 1000)
+              : 0
+
+            saveFrequencyState(this.db, {
+              emaLongBot: updateEma(currentState?.emaLongBot ?? 0, 1, decayLong),
+              emaLongTotal: updateEma(currentState?.emaLongTotal ?? 0, 1, decayLong),
+              emaShortBot: updateEma(currentState?.emaShortBot ?? 0, 1, decayShort),
+              emaShortTotal: updateEma(currentState?.emaShortTotal ?? 0, 1, decayShort),
+              lastUpdatedAt: now,
+            })
+          }
+          catch (error) {
+            this.log.withError(error).warn('EMA 狀態更新失敗')
+          }
+
           break
         }
         case 'reaction': {

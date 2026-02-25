@@ -79,6 +79,19 @@ function createTestServices(overrides: Partial<AgentServices> = {}): AgentServic
     runObserver: (mock(async () => {}) as unknown) as AgentServices['runObserver'],
     processNewChunks: (mock(async () => {}) as unknown) as AgentServices['processNewChunks'],
     recordActivity: (mock(() => {}) as unknown) as AgentServices['recordActivity'],
+    checkFrequency: (mock(() => ({
+      shouldRespond: true,
+      probability: 1,
+      metadata: {
+        emaLongShare: 0,
+        emaShortShare: 0,
+        target: 0.2,
+        activeMembers: 1,
+        rng: 0,
+        isMention: false,
+        reason: 'pass',
+      },
+    })) as unknown) as AgentServices['checkFrequency'],
     ...overrides,
   }
 }
