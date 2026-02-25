@@ -7,6 +7,8 @@ import { log } from '../logger'
 import { getChunkContents } from '../storage/chunks'
 import { embedText, searchSimilarChunks } from '../storage/embedding'
 import { getGroupSummary, getUserSummariesForGroup } from '../storage/summaries'
+import { replaceUserIdsWithAliases } from './alias-replacer'
+import { getAliasMap } from '../storage/user-aliases'
 
 const contextLog = log.withPrefix('[Context]')
 
@@ -16,6 +18,7 @@ export interface ContextDeps {
   embedText: typeof embedText
   searchSimilarChunks: typeof searchSimilarChunks
   getChunkContents: typeof getChunkContents
+  getAliasMap: (db: DB, userIds: string[]) => Promise<Map<string, { alias: string; userName: string }>>
 }
 
 const defaultDeps: ContextDeps = {
@@ -24,6 +27,7 @@ const defaultDeps: ContextDeps = {
   embedText,
   searchSimilarChunks,
   getChunkContents,
+  getAliasMap,
 }
 
 export interface AssembleContextParams {
@@ -69,9 +73,13 @@ export async function assembleContext(params: AssembleContextParams): Promise<Mo
     recentMessages.filter(m => !m.isBot).map(m => m.userId),
   )]
   const userSummaryMap = await deps.getUserSummariesForGroup(db, nonBotUserIds)
+  const aliasMap = await deps.getAliasMap(db, nonBotUserIds)
+  const userIdToAliasMap = new Map(
+    [...aliasMap.entries()].map(([uid, { alias }]) => [uid, alias]),
+  )
   let userSummarySection = ''
   if (userSummaryMap.size > 0) {
-    const lines = [...userSummaryMap.entries()].map(([uid, summary]) => `${uid}: ${summary}`)
+    const lines = [...userSummaryMap.entries()].map(([uid, summary]) => `${aliasMap.get(uid)?.alias ?? uid}: ${summary}`)
     userSummarySection = `<user_profiles>\n${lines.join('\n')}\n</user_profiles>`
     contextLog.withMetadata({ userCount: userSummaryMap.size }).debug('User summaries loaded')
   }
@@ -95,7 +103,8 @@ export async function assembleContext(params: AssembleContextParams): Promise<Mo
           const chunkIds = similar.map(s => s.chunkId)
           const contents = deps.getChunkContents(db, chunkIds)
           if (contents.length > 0) {
-            semanticSection = `<related_history>\n${contents.join('\n')}\n</related_history>`
+            const replacedContents = contents.map(content => replaceUserIdsWithAliases(content, userIdToAliasMap))
+            semanticSection = `<related_history>\n${replacedContents.join('\n')}\n</related_history>`
           }
         }
       }
@@ -141,7 +150,7 @@ export async function assembleContext(params: AssembleContextParams): Promise<Mo
   // ── Chat messages：合併連續同 role 訊息 ──
   // recentMessages 來自 DB DESC 排序（最新在前），LLM 需要時間正序，先 reverse。
   // 連續的非 bot 訊息合併為單一 user message，維持 user/assistant 交替結構。
-  const chatMessages = buildChatMessages([...recentMessages].reverse())
+  const chatMessages = buildChatMessages([...recentMessages].reverse(), userIdToAliasMap)
 
   return [
     { role: 'system', content: systemPrompt },
@@ -159,7 +168,7 @@ export async function assembleContext(params: AssembleContextParams): Promise<Mo
  * WHY 合併：群聊中多人連續發言是常態，若每則都獨立為 user role，
  * 會產生連續多個 user message，不符合 LLM 預期的 user/assistant 交替格式。
  */
-export function buildChatMessages(ordered: StoredMessage[]): ModelMessage[] {
+export function buildChatMessages(ordered: StoredMessage[], aliasMap: Map<string, string> = new Map()): ModelMessage[] {
   const result: ModelMessage[] = []
   let userBuffer: string[] = []
 
@@ -176,7 +185,8 @@ export function buildChatMessages(ordered: StoredMessage[]): ModelMessage[] {
       result.push({ role: 'assistant' as const, content: msg.content })
     }
     else {
-      userBuffer.push(`${msg.userId}: ${msg.content}`)
+      const displayId = aliasMap.get(msg.userId) ?? msg.userId
+      userBuffer.push(`${displayId}: ${msg.content}`)
     }
   }
   flushUserBuffer()

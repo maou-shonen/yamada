@@ -57,3 +57,17 @@ export interface StoredChunk {
   startTimestamp: number
   endTimestamp: number
 }
+
+/**
+ * 用戶別名記錄
+ * userId: 用戶 ID
+ * alias: 隱私別名
+ * userName: 原始用戶名稱
+ * updatedAt: 更新時間戳（Unix ms）
+ */
+export interface UserAlias {
+  userId: string
+  alias: string
+  userName: string
+  updatedAt: number
+}

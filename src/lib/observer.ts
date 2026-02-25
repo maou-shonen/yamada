@@ -13,6 +13,7 @@ import {
   upsertUserSummary,
 } from '../storage/summaries'
 import { createProvider } from './provider.ts'
+import { getAliasMap } from '../storage/user-aliases'
 
 const observerLog = log.withPrefix('[Observer]')
 
@@ -26,6 +27,7 @@ export interface ObserverDeps {
   upsertGroupSummary: typeof upsertGroupSummary
   getUserSummary: typeof getUserSummary
   upsertUserSummary: typeof upsertUserSummary
+  getAliasMap: (db: DB, userIds: string[]) => Promise<Map<string, { alias: string; userName: string }>>
 }
 
 const defaultDeps: ObserverDeps = {
@@ -38,6 +40,7 @@ const defaultDeps: ObserverDeps = {
   upsertGroupSummary,
   getUserSummary,
   upsertUserSummary,
+  getAliasMap,
 }
 
 /**
@@ -110,7 +113,12 @@ export async function compressGroupSummary(
 
   observerLog.withMetadata({ messageCount: messages.length, hasExisting: !!existingSummary }).debug('Group summary compression data')
 
-  const historyText = formatChatHistory(messages)
+  // 取得 userIds 並查詢 alias map
+  const userIds = [...new Set(messages.filter(m => !m.isBot).map(m => m.userId))]
+  const fullAliasMap = await deps.getAliasMap(db, userIds)
+  const aliasMap = new Map([...fullAliasMap.entries()].map(([uid, v]) => [uid, v.alias]))
+
+  const historyText = formatChatHistory(messages, aliasMap)
   const prompt = buildGroupCompressionPrompt(existingSummary, historyText)
 
   const result = await deps.generateText({

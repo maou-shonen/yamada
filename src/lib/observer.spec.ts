@@ -69,6 +69,7 @@ function createFakeDeps() {
     upsertGroupSummary,
     getUserSummary,
     upsertUserSummary,
+    getAliasMap: async () => new Map<string, { alias: string; userName: string }>(),
   }
 
   return {

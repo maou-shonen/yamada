@@ -3,8 +3,8 @@
  * 獨立於 AI 呼叫邏輯，方便迭代措辭和調整格式。
  */
 
-export function formatChatHistory(messages: { userId: string, content: string }[]): string {
-  return messages.map(m => `${m.userId}: ${m.content}`).join('\n')
+export function formatChatHistory(messages: { userId: string, content: string }[], aliasMap?: Map<string, string>): string {
+  return messages.map(m => `${aliasMap?.get(m.userId) ?? m.userId}: ${m.content}`).join('\n')
 }
 
 export function buildGroupCompressionPrompt(existingSummary: string | null, historyText: string): string {

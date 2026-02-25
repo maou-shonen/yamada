@@ -134,6 +134,16 @@ function initSchema(sqlite: Database): void {
       last_updated_at INTEGER NOT NULL DEFAULT 0
     )
   `)
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS user_aliases (
+      user_id TEXT NOT NULL,
+      alias TEXT NOT NULL,
+      user_name TEXT NOT NULL,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (user_id, alias)
+    )
+  `)
+  sqlite.exec(`CREATE UNIQUE INDEX IF NOT EXISTS user_aliases_alias_unique ON user_aliases(alias)`)
 }
 
 /**

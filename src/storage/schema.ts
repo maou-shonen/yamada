@@ -107,3 +107,23 @@ export const frequencyState = sqliteTable('frequency_state', {
   emaShortTotal: real('ema_short_total').notNull().default(0),
   lastUpdatedAt: integer('last_updated_at').notNull().default(0),
 })
+
+/**
+ * 用戶別名表 - 儲存此群組中每個用戶的隱私別名
+ * Per-group DB：複合主鍵 (userId, alias)，alias 全域唯一
+ * userName: 原始用戶名稱（用於 bot 訊息儲存時的內容替換）
+ * updatedAt: 別名建立或更新時間戳（Unix ms）
+ */
+export const userAliases = sqliteTable(
+  'user_aliases',
+  {
+    userId: text('user_id').notNull(),
+    alias: text('alias').notNull(),
+    userName: text('user_name').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  table => ({
+    pk: primaryKey({ columns: [table.userId, table.alias] }),
+    aliasUnique: uniqueIndex('user_aliases_alias_unique').on(table.alias),
+  }),
+)

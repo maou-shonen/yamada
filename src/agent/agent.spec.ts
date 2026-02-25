@@ -93,6 +93,8 @@ function createFakeServices() {
     processNewChunks: processNewChunksMock as unknown as AgentServices['processNewChunks'],
     recordActivity: recordActivityMock as unknown as AgentServices['recordActivity'],
     checkFrequency: checkFrequencyMock as unknown as AgentServices['checkFrequency'],
+    getOrCreateAlias: mock(async () => ({ alias: 'test_alias', userName: 'TestUser' })) as unknown as AgentServices['getOrCreateAlias'],
+    getAliasMap: mock(async () => new Map()) as unknown as AgentServices['getAliasMap'],
   }
 
   return {
@@ -149,7 +151,7 @@ describe('Agent', () => {
     })
 
     const msg = makeMessage()
-    agent.receiveMessage(msg)
+    await agent.receiveMessage(msg)
 
     expect(mocks.recordActivityMock.mock.calls.length).toBe(1)
     expect(mocks.recordActivityMock).toHaveBeenCalledWith(
@@ -177,7 +179,7 @@ describe('Agent', () => {
     })
 
     const msg = makeMessage({ content: '[貼圖]' })
-    agent.receiveMessage(msg)
+    await agent.receiveMessage(msg)
 
     expect(mocks.recordActivityMock.mock.calls.length).toBe(1)
     expect(mocks.recordActivityMock).toHaveBeenCalledWith(
@@ -199,7 +201,7 @@ describe('Agent', () => {
     })
 
     const msg = makeMessage({ content: '看這個 https://example.com' })
-    agent.receiveMessage(msg)
+    await agent.receiveMessage(msg)
 
     expect(mocks.recordActivityMock.mock.calls.length).toBe(1)
     expect(mocks.recordActivityMock).toHaveBeenCalledWith(
@@ -221,7 +223,7 @@ describe('Agent', () => {
     })
 
     const msg = makeMessage({ isMention: true })
-    agent.receiveMessage(msg)
+    await agent.receiveMessage(msg)
 
     expect(mocks.recordActivityMock.mock.calls.length).toBe(1)
     expect(mocks.recordActivityMock).toHaveBeenCalledWith(

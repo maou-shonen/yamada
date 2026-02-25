@@ -1,0 +1,75 @@
+/**
+ * Alias 產生模組——embedded 字庫 + 碰撞處理。
+ * 無外部依賴，無副作用。
+ *
+ * 格式：`user_{adjective}_{noun}`
+ * 碰撞處理：重試最多 50 次，超過則 fallback 到 `user_{adj}_{noun}_{number}`
+ */
+
+const ADJECTIVES: readonly string[] = [
+  'amber', 'azure', 'bold', 'brave', 'bright', 'calm', 'clear', 'clever',
+  'cool', 'crisp', 'cyan', 'dark', 'dawn', 'deep', 'deft', 'dusk',
+  'eager', 'early', 'east', 'even', 'fair', 'fast', 'fine', 'firm',
+  'fleet', 'free', 'fresh', 'full', 'glad', 'gold', 'good', 'grand',
+  'gray', 'great', 'green', 'grey', 'hale', 'high', 'jade', 'just',
+  'keen', 'kind', 'large', 'late', 'lean', 'light', 'lively', 'lone',
+  'long', 'loud', 'low', 'lucky', 'mild', 'mint', 'misty', 'neat',
+  'new', 'nice', 'noble', 'north', 'oak', 'old', 'open', 'pale',
+  'pink', 'plain', 'plum', 'prime', 'proud', 'pure', 'quick', 'quiet',
+  'rare', 'red', 'rich', 'rose', 'round', 'royal', 'ruby', 'sage',
+  'salt', 'sandy', 'sharp', 'shiny', 'shy', 'silk', 'silver', 'slim',
+  'slow', 'smart', 'soft', 'solar', 'solid', 'south', 'still', 'stone',
+  'sunny', 'swift', 'tall', 'teal', 'tiny', 'true', 'warm', 'west',
+  'white', 'wide', 'wild', 'wise', 'young',
+]
+
+const NOUNS: readonly string[] = [
+  'ant', 'ape', 'arc', 'ash', 'bay', 'bear', 'bee', 'bird',
+  'brook', 'buck', 'cat', 'cave', 'cedar', 'cliff', 'cloud', 'coral',
+  'crane', 'creek', 'crow', 'dawn', 'deer', 'dove', 'dune', 'eagle',
+  'elm', 'fern', 'finch', 'fish', 'fjord', 'flame', 'flock', 'fog',
+  'fox', 'frog', 'gale', 'gull', 'hawk', 'haze', 'hill', 'hive',
+  'hound', 'iris', 'isle', 'jay', 'kite', 'lake', 'lark', 'leaf',
+  'lion', 'lynx', 'maple', 'marsh', 'mist', 'moon', 'moss', 'moth',
+  'mouse', 'oak', 'orca', 'otter', 'owl', 'peak', 'pine', 'pond',
+  'pool', 'quail', 'rain', 'raven', 'reed', 'reef', 'ridge', 'river',
+  'robin', 'rock', 'rose', 'sage', 'sand', 'seal', 'shore', 'sky',
+  'snow', 'sparrow', 'spring', 'star', 'stone', 'storm', 'stream', 'sun',
+  'swan', 'tide', 'tiger', 'toad', 'trail', 'tree', 'vale', 'vine',
+  'vole', 'wave', 'wren', 'wolf',
+]
+
+/**
+ * 產生唯一的用戶別名。
+ *
+ * @param existingAliases 已存在的別名集合（用於碰撞檢測）
+ * @returns 格式為 `user_{adj}_{noun}` 的別名，碰撞時加數字後綴
+ */
+export function generateAlias(existingAliases: Set<string>): string {
+  const adj = ADJECTIVES[Math.floor(Math.random() * ADJECTIVES.length)]!
+  const noun = NOUNS[Math.floor(Math.random() * NOUNS.length)]!
+  const base = `user_${adj}_${noun}`
+
+  // 嘗試不帶數字後綴的版本
+  if (!existingAliases.has(base)) {
+    return base
+  }
+
+  // 重試最多 50 次（不同的 adj/noun 組合）
+  for (let i = 0; i < 50; i++) {
+    const retryAdj = ADJECTIVES[Math.floor(Math.random() * ADJECTIVES.length)]!
+    const retryNoun = NOUNS[Math.floor(Math.random() * NOUNS.length)]!
+    const candidate = `user_${retryAdj}_${retryNoun}`
+    if (!existingAliases.has(candidate)) {
+      return candidate
+    }
+  }
+
+  // Fallback：加數字後綴直到不碰撞
+  for (let n = 1; ; n++) {
+    const fallback = `${base}_${n}`
+    if (!existingAliases.has(fallback)) {
+      return fallback
+    }
+  }
+}

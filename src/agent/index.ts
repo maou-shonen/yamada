@@ -14,6 +14,8 @@ import { recordActivity } from '../storage/user-stats'
 import { containsUrl, STICKER_CONTENT } from '../utils'
 import { checkFrequency } from './frequency-controller'
 import { calculateDecay, updateEma } from './frequency-math'
+import { replaceAliasesWithNames } from '../lib/alias-replacer'
+import { getAliasMap, getOrCreateAlias } from '../storage/user-aliases'
 
 export interface AgentServices {
   saveMessage: typeof saveMessage
@@ -27,6 +29,8 @@ export interface AgentServices {
   processNewChunks: typeof processNewChunks
   recordActivity: typeof recordActivity
   checkFrequency: typeof checkFrequency
+  getOrCreateAlias: (db: DB, userId: string, userName: string) => Promise<{ alias: string; userName: string }>
+  getAliasMap: (db: DB, userIds: string[]) => Promise<Map<string, { alias: string; userName: string }>>
 }
 
 const defaultServices: AgentServices = {
@@ -41,6 +45,8 @@ const defaultServices: AgentServices = {
   processNewChunks,
   recordActivity,
   checkFrequency,
+  getOrCreateAlias,
+  getAliasMap,
 }
 
 export interface AgentOptions {
@@ -85,7 +91,7 @@ export class Agent {
    * 接收訊息，只做儲存（不觸發 AI pipeline）
    * 觸發時機由外部排程器決定
    */
-  receiveMessage(message: UnifiedMessage): void {
+  async receiveMessage(message: UnifiedMessage): Promise<void> {
     this.log
       .withMetadata({
         messageId: message.id,
@@ -98,6 +104,14 @@ export class Agent {
       .info('Received message')
 
     this.services.saveMessage(this.db, message)
+
+    // Alias upsert：每次收到訊息時更新 alias（追蹤用戶改名）
+    try {
+      await this.services.getOrCreateAlias(this.db, message.userId, message.userName)
+    }
+    catch (error) {
+      this.log.withError(error).warn('Alias upsert 失敗，繼續處理')
+    }
 
     // 記錄用戶活動統計
     try {
@@ -171,6 +185,11 @@ export class Agent {
     const recentMessages = this.services.getRecentMessages(this.db, this.config.CONTEXT_RECENT_MESSAGE_COUNT)
     this.log.withMetadata({ recentCount: recentMessages.length }).debug('Fetched recent messages')
 
+    // 查詢 alias map（用於 context 組裝和回覆後處理）
+    const nonBotUserIds = [...new Set(recentMessages.filter(m => !m.isBot).map(m => m.userId))]
+    const aliasMap = await this.services.getAliasMap(this.db, nonBotUserIds)
+    const reverseMap = new Map([...aliasMap.entries()].map(([, { alias, userName }]) => [alias, userName]))
+
     this.log.debug('Assembling context...')
     const contextMessages = await this.services.assembleContext({
       recentMessages,
@@ -201,12 +220,14 @@ export class Agent {
     for (const action of actions) {
       switch (action.type) {
         case 'reply': {
+          // 回覆後處理：alias → userName（用戶看到真實名稱）
+          const processedContent = replaceAliasesWithNames(action.content, reverseMap)
           if (channel) {
             this.log.withMetadata({ platform }).debug('Delivering reply...')
             await this.services.deliverReply({
               channel,
               groupId: this.groupId,
-              content: action.content,
+              content: processedContent,
               platform,
               config: this.config,
             })

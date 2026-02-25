@@ -43,6 +43,7 @@ function createFakeDeps(): ContextDeps {
     embedText: (async () => [0.1, 0.2, 0.3]) as unknown as ContextDeps['embedText'],
     searchSimilarChunks: (() => []) as unknown as ContextDeps['searchSimilarChunks'],
     getChunkContents: (() => []) as unknown as ContextDeps['getChunkContents'],
+    getAliasMap: (async () => new Map()) as unknown as ContextDeps['getAliasMap'],
   }
 }
 
