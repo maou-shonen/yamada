@@ -33,6 +33,12 @@ export function createTestConfig(overrides: Partial<Config> = {}): Config {
     DEBOUNCE_URGENT_MS: 2000,
     DEBOUNCE_OVERFLOW_CHARS: 3000,
 
+    // ── Frequency ──
+    FREQUENCY_ENABLED: true,
+    FREQUENCY_LONG_HALFLIFE_HOURS: 120,
+    FREQUENCY_SHORT_HALFLIFE_HOURS: 4,
+    FREQUENCY_ACTIVE_WINDOW_DAYS: 7,
+
     // ── Scheduler ──
     SCHEDULER_POLL_INTERVAL_MS: 2000,
 

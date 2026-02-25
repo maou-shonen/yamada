@@ -55,6 +55,16 @@ const configSchema = z.object({
   /** 溢出觸發：buffer 累積字元超過此值即立刻觸發 */
   DEBOUNCE_OVERFLOW_CHARS: z.coerce.number().int().positive().default(3000),
 
+  // ── Frequency — 回應頻率控制 ──
+
+  /** 頻率控制器總開關 */
+  FREQUENCY_ENABLED: z.preprocess(v => v === 'true' || v === '1', z.boolean()).default(true),
+  /** 長期 EMA 半衰期（小時），預設 5 天 */
+  FREQUENCY_LONG_HALFLIFE_HOURS: z.coerce.number().positive().default(120),
+  /** 短期 EMA 半衰期（小時），防止連發 */
+  FREQUENCY_SHORT_HALFLIFE_HOURS: z.coerce.number().positive().default(4),
+  /** 計算活躍人數的時間窗口（天） */
+  FREQUENCY_ACTIVE_WINDOW_DAYS: z.coerce.number().int().positive().default(7),
   // ── Scheduler — 排程器輪詢設定 ──
 
   /** 排程器輪詢間隔（ms），控制檢查 pending triggers 的頻率 */

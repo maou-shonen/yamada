@@ -109,6 +109,15 @@ bun run src/index.ts
 | `DEBOUNCE_URGENT_MS`      | `2000`  | @mention 急迫模式：被 mention 時改用較短等待時間 |
 | `DEBOUNCE_OVERFLOW_CHARS` | `3000`  | 溢出觸發：buffer 累積字元超過此值即立刻觸發      |
 
+### Frequency — 回應頻率控制
+
+| 變數                              | 預設値 | 說明                              |
+| ------------------------------------ | ------- | ---------------------------------- |
+| `FREQUENCY_ENABLED`                  | `true`  | 頻率控制器總開關                   |
+| `FREQUENCY_LONG_HALFLIFE_HOURS`      | `120`   | 長期 EMA 半衰期（小時），預設 5 天     |
+| `FREQUENCY_SHORT_HALFLIFE_HOURS`     | `4`     | 短期 EMA 半衰期（小時），防止連發     |
+| `FREQUENCY_ACTIVE_WINDOW_DAYS`       | `7`     | 計算活躍人數的時間窗口（天）         |
+
 ### Context — 控制送給 AI 的上下文內容
 
 | 變數                           | 預設值 | 說明                                  |

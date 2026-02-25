@@ -48,4 +48,30 @@ describe('loadConfig', () => {
       expect(typeof config.SCHEDULER_POLL_INTERVAL_MS).toBe('number')
     })
   })
+
+  describe('FREQUENCY_*', () => {
+    test('預設值正確', () => {
+      const config = loadConfig({})
+      expect(config.FREQUENCY_ENABLED).toBe(true)
+      expect(config.FREQUENCY_LONG_HALFLIFE_HOURS).toBe(120)
+      expect(config.FREQUENCY_SHORT_HALFLIFE_HOURS).toBe(4)
+      expect(config.FREQUENCY_ACTIVE_WINDOW_DAYS).toBe(7)
+    })
+
+    test('可透過環境變數覆寫', () => {
+      const config = loadConfig({
+        FREQUENCY_LONG_HALFLIFE_HOURS: '48',
+        FREQUENCY_ENABLED: 'false',
+      })
+      expect(config.FREQUENCY_ENABLED).toBe(false)
+      expect(config.FREQUENCY_LONG_HALFLIFE_HOURS).toBe(48)
+      expect(config.FREQUENCY_SHORT_HALFLIFE_HOURS).toBe(4)
+      expect(config.FREQUENCY_ACTIVE_WINDOW_DAYS).toBe(7)
+    })
+
+    test('FREQUENCY_ENABLED 支援 "1" 為 true', () => {
+      const config = loadConfig({ FREQUENCY_ENABLED: '1' })
+      expect(config.FREQUENCY_ENABLED).toBe(true)
+    })
+  })
 })
