@@ -1,0 +1,16 @@
+node_modules
+data/
+logs/
+.env
+.env.*
+.git
+.gitignore
+.vscode
+.sisyphus
+.sidecar
+*.md
+!README.md
+LICENSE
+coverage
+*.lcov
+*.tgz
