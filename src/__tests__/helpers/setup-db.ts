@@ -58,6 +58,16 @@ export function setupTables(sqlite: Database): void {
       PRIMARY KEY (user_id, date)
     )
   `)
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS frequency_state (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      ema_long_bot REAL NOT NULL DEFAULT 0,
+      ema_long_total REAL NOT NULL DEFAULT 0,
+      ema_short_bot REAL NOT NULL DEFAULT 0,
+      ema_short_total REAL NOT NULL DEFAULT 0,
+      last_updated_at INTEGER NOT NULL DEFAULT 0
+    )
+  `)
 }
 
 /**

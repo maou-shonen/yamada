@@ -1,4 +1,4 @@
-import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core'
+import { index, integer, primaryKey, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core'
 
 /**
  * 訊息表 - 儲存此群組的所有訊息
@@ -93,3 +93,17 @@ export const chunks = sqliteTable(
     endTimestampIdx: index('chunks_end_timestamp_idx').on(table.endTimestamp),
   }),
 )
+
+/**
+ * 頻率控制器 EMA 狀態表（Singleton）
+ * 每個 per-group DB 只有一筆 row（id=1），使用 INSERT OR REPLACE 更新
+ * 儲存長短期 EMA 數值，供頻率控制器在重啟後恢復狀態
+ */
+export const frequencyState = sqliteTable('frequency_state', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  emaLongBot: real('ema_long_bot').notNull().default(0),
+  emaLongTotal: real('ema_long_total').notNull().default(0),
+  emaShortBot: real('ema_short_bot').notNull().default(0),
+  emaShortTotal: real('ema_short_total').notNull().default(0),
+  lastUpdatedAt: integer('last_updated_at').notNull().default(0),
+})
