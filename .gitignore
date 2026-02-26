@@ -39,3 +39,4 @@ data/
 # agent working files
 .sisyphus/
 .sidecar/
+.tailscale/

@@ -58,6 +58,21 @@ cp .env.example .env   # 編輯填入 token
 bun run src/index.ts
 ```
 
+### Docker（開發用）
+
+透過 Docker Compose 啟動，內建 Tailscale sidecar 提供公網 HTTPS（LINE Webhook 用）。
+
+```bash
+cp .env.example .env   # 編輯填入 token（含 TS_AUTHKEY）
+docker compose up      # 啟動（首次會自動 build）
+```
+
+前置準備：
+
+1. [Tailscale Admin](https://login.tailscale.com/admin/settings/keys) 產生 auth key → 填入 `.env` 的 `TS_AUTHKEY`
+2. 確認 tailnet 已啟用 [Funnel](https://tailscale.com/kb/1223/funnel)（Admin → DNS → Enable HTTPS + Funnel）
+3. LINE Webhook URL 設為 `https://yamada.<your-tailnet>.ts.net/webhook/line`
+
 ## 環境變數
 
 所有設定皆透過環境變數（`.env`）提供，由 Zod schema 驗證並填入預設值。
@@ -76,6 +91,7 @@ bun run src/index.ts
 | `AI_API_KEY`                |      | 自訂端點 API Key（不設定則 fallback OPENAI_API_KEY）       |
 | `EMBEDDING_BASE_URL`        |      | Embedding 專用端點 URL（不設定則 fallback 到 AI_BASE_URL） |
 | `EMBEDDING_API_KEY`         |      | Embedding 專用 API Key（不設定則 fallback 到 AI_API_KEY）  |
+| `TS_AUTHKEY`                |      | Tailscale auth key（Docker Compose 用，`tskey-auth-` 開頭）  |
 
 ### 人格與基本設定
 
