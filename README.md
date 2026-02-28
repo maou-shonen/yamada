@@ -13,42 +13,24 @@
 
 ```mermaid
 graph TD
-    Discord[Discord Gateway] --> Channels
-    LINE[LINE Webhook] --> Channels
+    D[Discord] & L[LINE] -->|統一訊息格式| Agent[群組 Agent<br/>per-group 隔離]
 
-    subgraph Core
-        Channels[Platform Channels] --> Router
-        Router -->|per-group| Agent[Group Agent]
-        Agent --> Debounce
-        Debounce -->|觸發| Context[Context 組裝]
-        Context --> Generator[AI 生成]
-        Generator --> Delivery[回覆投遞]
-        Agent -.->|背景| Observer[Observer 記憶壓縮]
-        Agent -.->|背景| Embedding[向量索引]
-    end
+    Agent --> When{何時回覆?<br/>debounce · 頻率控制}
+    When -->|觸發| What[上下文組裝 → AI 生成]
+    What --> Reply[回覆投遞]
+    Reply --> D & L
 
-    subgraph Data
-        SQLite[(SQLite + Drizzle)]
-        Vec[(sqlite-vec 向量)]
-    end
-
-    Context --> SQLite
-    Context --> Vec
-    Observer --> SQLite
-    Embedding --> Vec
-    Generator --> AI{{OpenAI API}}
-    Observer --> AI
-    Embedding --> AI
+    What <-.->|查詢| Mem[(長期記憶<br/>摘要 · 語義搜尋)]
+    Agent -.->|背景更新| Mem
 ```
 
 ### 核心流程
 
-1. **訊息進入** — Discord/LINE Channel 轉換為統一格式
-2. **路由** — Router 過濾 bot 訊息、拒絕 DM、路由到對應群組的 Agent
-3. **Debounce** — 等待靜默(秒) / 溢出N字 / @mention 盡快觸發
-4. **Context 組裝** — SOUL 人格 + 群組摘要 + 使用者摘要 + 語義搜尋 + 近期訊息，控制 token 預算
-5. **AI 生成** — Vercel AI SDK 呼叫，回覆經平台長度截斷後送出
-6. **背景任務** — Observer 壓縮舊對話為摘要、Embedding 建立向量索引
+1. **雙平台接入** — Discord / LINE 訊息轉為統一格式，送入對應群組的 Agent
+2. **時機判斷** — Debounce 等大家說完再回；頻率控制避免刷屏
+3. **上下文組裝** — 人格 + 記憶摘要 + 語義搜尋 + 近期訊息，控制 token 預算
+4. **AI 生成回覆** — 可回覆、反應、或靜默跳過
+5. **背景記憶** — 持續壓縮舊對話為摘要，建立語義索引供未來查詢
 
 ## 快速開始
 
@@ -60,18 +42,18 @@ bun run src/index.ts
 
 ### Docker（開發用）
 
-透過 Docker Compose 啟動，內建 Tailscale sidecar 提供公網 HTTPS（LINE Webhook 用）。
+透過 Docker Compose 啟動，內建 Cloudflare Tunnel sidecar 提供公網 HTTPS（LINE Webhook 用）。
 
 ```bash
-cp .env.example .env   # 編輯填入 token（含 TS_AUTHKEY）
+cp .env.example .env   # 編輯填入 token（含 TUNNEL_TOKEN）
 docker compose up      # 啟動（首次會自動 build）
 ```
 
 前置準備：
 
-1. [Tailscale Admin](https://login.tailscale.com/admin/settings/keys) 產生 auth key → 填入 `.env` 的 `TS_AUTHKEY`
-2. 確認 tailnet 已啟用 [Funnel](https://tailscale.com/kb/1223/funnel)（Admin → DNS → Enable HTTPS + Funnel）
-3. LINE Webhook URL 設為 `https://yamada.<your-tailnet>.ts.net/webhook/line`
+1. 在 [Cloudflare Zero Trust](https://one.dash.cloudflare.com/) 建立 Tunnel（Networks → Tunnels → Create）
+2. 設定 public hostname 指向 `http://localhost:3000`，複製 Tunnel Token → 填入 `.env` 的 `TUNNEL_TOKEN`
+3. LINE Webhook URL 設為 `https://<your-hostname>/webhook/line`
 
 ## 環境變數
 
@@ -81,17 +63,24 @@ docker compose up      # 啟動（首次會自動 build）
 
 ### 秘密憑證
 
-| 變數                        | 必要 | 說明                                                       |
-| --------------------------- | ---- | ---------------------------------------------------------- |
-| `DISCORD_TOKEN`             | ⚡   | Discord Bot Token                                          |
-| `DISCORD_CLIENT_ID`         | ⚡   | Discord Application ID                                     |
-| `LINE_CHANNEL_SECRET`       | ⚡   | LINE Channel Secret                                        |
-| `LINE_CHANNEL_ACCESS_TOKEN` | ⚡   | LINE Channel Access Token                                  |
-| `AI_BASE_URL`               |      | 自訂 OpenAI 相容端點 URL（不設定則使用預設 OpenAI）        |
-| `AI_API_KEY`                |      | 自訂端點 API Key（不設定則 fallback OPENAI_API_KEY）       |
-| `EMBEDDING_BASE_URL`        |      | Embedding 專用端點 URL（不設定則 fallback 到 AI_BASE_URL） |
-| `EMBEDDING_API_KEY`         |      | Embedding 專用 API Key（不設定則 fallback 到 AI_API_KEY）  |
-| `TS_AUTHKEY`                |      | Tailscale auth key（Docker Compose 用，`tskey-auth-` 開頭）  |
+| 變數                        | 必要 | 說明                                                        |
+| --------------------------- | ---- | ----------------------------------------------------------- |
+| `DISCORD_TOKEN`             | ⚡   | Discord Bot Token                                           |
+| `DISCORD_CLIENT_ID`         | ⚡   | Discord Application ID                                      |
+| `LINE_CHANNEL_SECRET`       | ⚡   | LINE Channel Secret                                         |
+| `LINE_CHANNEL_ACCESS_TOKEN` | ⚡   | LINE Channel Access Token                                   |
+| `OPENAI_API_KEY`            |      | OpenAI API Key（不設定則 SDK 自動讀取 env var）               |
+| `OPENAI_BASE_URL`           |      | OpenAI 自訂端點（不設定則使用官方預設）                       |
+| `ANTHROPIC_API_KEY`         |      | Anthropic API Key（不設定則 SDK 自動讀取 env var）            |
+| `ANTHROPIC_BASE_URL`        |      | Anthropic 自訂端點（不設定則使用官方預設）                    |
+| `GOOGLE_API_KEY`            |      | Google AI Studio API Key（不設定則 SDK 自動讀取 env var）     |
+| `GOOGLE_BASE_URL`           |      | Google AI Studio 自訂端點（不設定則使用官方預設）             |
+| `OPENROUTER_API_KEY`        |      | OpenRouter API Key                                           |
+| `OPENROUTER_BASE_URL`       |      | OpenRouter 自訂端點（預設 `https://openrouter.ai/api/v1`）   |
+| `OPENCODE_API_KEY`          |      | OpenCode Zen API Key                                         |
+| `OPENCODE_BASE_URL`         |      | OpenCode Zen 自訂端點（預設 `https://opencode.ai/zen/v1`）   |
+| `TUNNEL_TOKEN`              |      | Cloudflare Tunnel Token（Docker Compose 用）                |
+| `TUNNEL_TOKEN`              |      | Cloudflare Tunnel Token（Docker Compose 用）                |
 
 ### 人格與基本設定
 
@@ -104,18 +93,32 @@ docker compose up      # 啟動（首次會自動 build）
 
 ### AI 模型
 
-| 變數             | 預設值        | 說明                                   |
-| ---------------- | ------------- | -------------------------------------- |
-| `AI_PROVIDER`    | `openai`      | AI provider 名稱（對應 Vercel AI SDK） |
-| `AI_MODEL`       | `gpt-4o-mini` | 對話生成模型 ID                        |
-| `OBSERVER_MODEL` | `gpt-4o-mini` | Observer 摘要壓縮用的模型 ID           |
+模型 ID 格式：`provider/model-name`（例如 `openai/gpt-5`、`openrouter/deepseek/deepseek-v3.2`）。
+支援逗號分隔的多模型 fallback，依序嘗試直到成功。
+
+| 變數             | 預設值                                                            | 說明                           |
+| ---------------- | ----------------------------------------------------------------- | ------------------------------ |
+| `CHAT_MODEL`     | `openrouter/x-ai/grok-4.1-fast,openrouter/deepseek/deepseek-v3.2` | 聊天模型（逗號 = fallback）    |
+| `OBSERVER_MODEL` | 同 `CHAT_MODEL`                                                   | Observer 摘要壓縮用模型      |
+
+**支援的 provider 與 API 設定：**
+
+| Provider        | 預設端點                              | 設定欄位                                            |
+| --------------- | ------------------------------------- | --------------------------------------------------- |
+| `openai`        | OpenAI 官方                           | `OPENAI_API_KEY` / `OPENAI_BASE_URL`                |
+| `anthropic`     | Anthropic 官方                        | `ANTHROPIC_API_KEY` / `ANTHROPIC_BASE_URL`          |
+| `google`        | Google AI Studio                      | `GOOGLE_API_KEY` / `GOOGLE_BASE_URL`                |
+| `openrouter`    | `https://openrouter.ai/api/v1`        | `OPENROUTER_API_KEY` / `OPENROUTER_BASE_URL`        |
+| `opencode-zen`  | `https://opencode.ai/zen/v1`          | `OPENCODE_API_KEY` / `OPENCODE_BASE_URL`            |
 
 ### Embedding
 
-| 變數                   | 預設值                   | 說明                         |
-| ---------------------- | ------------------------ | ---------------------------- |
-| `EMBEDDING_MODEL`      | `text-embedding-3-small` | Embedding 模型 ID            |
-| `EMBEDDING_DIMENSIONS` | `1536`                   | 向量維度（需與模型輸出一致） |
+Embedding 使用與聊天模型相同的 provider API 設定，無獨立懑證。
+
+| 變數                   | 預設值                           | 說明                         |
+| ---------------------- | ------------------------------------ | ---------------------------- |
+| `EMBEDDING_MODEL`      | `openai/text-embedding-3-small`      | Embedding 模型 ID            |
+| `EMBEDDING_DIMENSIONS` | `1536`                               | 向量維度（需與模型輸出一致） |
 
 ### Debounce — 控制何時觸發 AI 回覆
 
@@ -198,3 +201,15 @@ docker compose up      # 啟動（首次會自動 build）
 2. 取得 Channel Secret 和 Access Token
 3. Webhook URL：`https://<domain>:3000/webhook/line`
 4. 關閉自動回覆
+
+## 測試追蹤代號
+
+整合測試依功能分類，每組以代號追蹤：
+
+| 代號 | 名稱 | 測試檔案 | 說明 |
+| --- | --- | --- | --- |
+| T1-CHAIN | End-to-end Chain | `src/__tests__/integration/chain.spec.ts` | 完整流程：訊息進入 → 觸發 → AI 回覆 → 投遞 |
+| T2-TRIGGER | Trigger State Machine | `src/__tests__/integration/chain.spec.ts` | Debounce 觸發機制：sticky mention、字元累積 |
+| T3-ISOLATE | Group Isolation | `src/__tests__/integration/isolation.spec.ts` | Per-group 隔離：跨群組不互相污染 |
+| T4-RESILIENCE | Error Resilience | `src/__tests__/integration/resilience.spec.ts` | 錯誤恢復：各層失敗不影響整體穩定性 |
+| T5-LINE-EDGE | LINE Edge Cases | `src/line/channel.spec.ts` | LINE 特殊訊息類型與 edge case |
