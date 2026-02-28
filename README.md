@@ -13,7 +13,8 @@
 
 ```mermaid
 graph TD
-    D[Discord] & L[LINE] -->|統一訊息格式| Agent[群組 Agent<br/>per-group 隔離]
+    D[Discord<br/>WebSocket 長連線] -->|UnifiedMessage| Agent[群組 Agent<br/>per-group 隔離]
+    L[LINE<br/>Webhook HTTP] -->|UnifiedMessage| Agent
 
     Agent --> When{何時回覆?<br/>debounce · 頻率控制}
     When -->|觸發| What[上下文組裝 → AI 生成]
@@ -26,11 +27,12 @@ graph TD
 
 ### 核心流程
 
-1. **雙平台接入** — Discord / LINE 訊息轉為統一格式，送入對應群組的 Agent
-2. **時機判斷** — Debounce 等大家說完再回；頻率控制避免刷屏
-3. **上下文組裝** — 人格 + 記憶摘要 + 語義搜尋 + 近期訊息，控制 token 預算
-4. **AI 生成回覆** — 可回覆、反應、或靜默跳過
-5. **背景記憶** — 持續壓縮舊對話為摘要，建立語義索引供未來查詢
+1. **平台接入** — Discord / LINE 各自處理平台特有邏輯（連線、內容解析、mention 判定），轉為統一訊息格式
+2. **群組路由** — 過濾 bot 訊息與 DM，路由到對應群組的 Agent（per-group 隔離）
+3. **時機判斷** — Debounce 等大家說完再回；頻率控制避免刷屏
+4. **上下文組裝** — 人格 + 記憶摘要 + 語義搜尋 + 近期訊息，控制 token 預算
+5. **AI 生成回覆** — 可回覆、反應、或靜默跳過
+6. **背景記憶** — 持續壓縮舊對話為摘要，建立語義索引供未來查詢
 
 ## 快速開始
 
