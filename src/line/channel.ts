@@ -169,6 +169,14 @@ export class LineChannel implements PlatformChannel {
   private async handleRequest(req: Request): Promise<Response> {
     const url = new URL(req.url)
 
+    // Health check endpoint
+    if (req.method === 'GET' && url.pathname === '/health') {
+      return new Response(JSON.stringify({ status: 'ok' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+
     if (req.method !== 'POST' || url.pathname !== '/webhook/line') {
       return new Response('Not Found', { status: 404 })
     }

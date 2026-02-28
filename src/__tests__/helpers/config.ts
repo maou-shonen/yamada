@@ -18,6 +18,7 @@ export function createTestConfig(overrides: Partial<Config> = {}): Config {
     DB_DIR: '/tmp/test-groups/',
     DISCORD_GROUP_ID_MODE: 'guild',
     LINE_WEBHOOK_PORT: 3000,
+    HEALTH_PORT: 3000,
 
     // ── AI 模型 ──
     AI_PROVIDER: 'openai',

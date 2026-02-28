@@ -21,6 +21,8 @@ export interface AppContext {
   startChannels: (activeChannels: PlatformChannel[]) => Promise<void>
   /** Graceful shutdown：停止 channels → scheduler → agents → 關閉 DB */
   shutdown: (activeChannels: PlatformChannel[]) => Promise<void>
+  /** Health server（當 LINE 未啟用時） */
+  healthServer?: ReturnType<typeof Bun.serve>
 }
 
 /** 可注入的選項（測試時用 mock 替換） */
@@ -54,6 +56,7 @@ export async function bootstrap(config: Config, options?: BootstrapOptions): Pro
 
   const channels = new Map<string, PlatformChannel>()
   const groupAgents = new Map<string, Agent>()
+  let healthServer: ReturnType<typeof Bun.serve> | undefined
 
   // 建立排程器（負責 debounce trigger 輪詢 + AI pipeline 觸發）
   const schedulerFactory = options?.createScheduler ?? defaultCreateScheduler
@@ -117,7 +120,25 @@ export async function bootstrap(config: Config, options?: BootstrapOptions): Pro
     log.withMetadata({ platforms: activeChannels.map(ch => ch.name) }).info('Starting platform channels...')
     await Promise.all(activeChannels.map(ch => ch.start()))
 
-    // Channels 就緒後才啟動排程器，確保觸發時 channel 已可投遞
+    // 若 LINE 未啟用，啟動獨立的 health server
+    if (!config.lineEnabled) {
+      healthServer = Bun.serve({
+        port: config.HEALTH_PORT,
+        fetch: (req) => {
+          const url = new URL(req.url)
+          if (req.method === 'GET' && url.pathname === '/health') {
+            return new Response(JSON.stringify({ status: 'ok' }), {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            })
+          }
+          return new Response('Not Found', { status: 404 })
+        },
+      })
+      log.withMetadata({ port: config.HEALTH_PORT }).info('Health server started')
+    }
+
+    // Channels 就緒後才啟動排程器，確保觸發時 channel 已可投送
     scheduler.start()
     log.info('Scheduler started')
   }
@@ -151,7 +172,14 @@ export async function bootstrap(config: Config, options?: BootstrapOptions): Pro
     manager.closeAll()
 
     log.info('yamada shutdown complete')
+
+    // 6. 停止 health server（當 LINE 未啟用時）
+    if (healthServer) {
+      healthServer.stop()
+      healthServer = undefined
+      log.info('Health server stopped')
+    }
   }
 
-  return { config, manager, channels, groupAgents, startChannels, shutdown }
+  return { config, manager, channels, groupAgents, startChannels, shutdown, healthServer }
 }

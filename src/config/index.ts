@@ -29,6 +29,8 @@ const configSchema = z.object({
   DISCORD_GROUP_ID_MODE: z.enum(['guild', 'channel']).default('guild'),
   /** LINE Webhook 監聽埠 */
   LINE_WEBHOOK_PORT: z.coerce.number().int().min(0).max(65535).default(3000),
+  /** Health check endpoint 監聽埠（當 LINE 未啟用時使用） */
+  HEALTH_PORT: z.coerce.number().int().min(0).max(65535).default(3000),
 
   // ── AI 模型 ──
 
