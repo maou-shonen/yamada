@@ -36,10 +36,12 @@ export function updateEma(current: number, observation: number, decay: number): 
   return current * decay + observation * (1 - decay)
 }
 
-/** 公平份額：1 / (activeMembers + 1)，最小值 0（activeMembers >= 0） */
-export function calculateTarget(activeMembers: number): number {
-  const sanitizedActiveMembers = Math.max(activeMembers, 0)
-  return 1 / (sanitizedActiveMembers + 1)
+/** 公平份額：1 / activeMembers（bot 對標每位真人用戶），下限為 minTarget */
+export function calculateTarget(activeMembers: number, minTarget: number = 0): number {
+  if (activeMembers <= 0)
+    return 1
+
+  return Math.max(1 / activeMembers, minTarget)
 }
 
 /** Beta prior 平滑 share：(botWeight + alpha) / (totalWeight + alpha + beta) */

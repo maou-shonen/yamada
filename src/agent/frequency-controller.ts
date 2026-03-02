@@ -106,7 +106,26 @@ export function checkFrequency(
 
   const since = now - (config.FREQUENCY_ACTIVE_WINDOW_DAYS * 24 * 60 * 60 * 1000)
   const activeMembers = resolvedDeps.countActiveMembers(db, since)
-  const target = calculateTarget(activeMembers)
+  const target = calculateTarget(activeMembers, config.FREQUENCY_MIN_TARGET)
+
+  // 一對一聊天（activeMembers <= 1）→ target = 1.0 → 無條件回覆
+  if (target >= 1) {
+    const metadata: FrequencyMetadata = {
+      emaLongShare: 0,
+      emaShortShare: 0,
+      target,
+      activeMembers,
+      rng: 0,
+      isMention,
+      reason: 'solo_chat',
+    }
+
+    return {
+      shouldRespond: true,
+      probability: 1,
+      metadata,
+    }
+  }
 
   let decayLong = 1
   let decayShort = 1

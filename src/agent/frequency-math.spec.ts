@@ -84,16 +84,32 @@ describe('updateEma', () => {
 })
 
 describe('calculateTarget', () => {
-  test('activeMembers = 4 時目標份額為 1/5', () => {
-    expect(calculateTarget(4)).toBeCloseTo(0.2, 4)
+  test('activeMembers = 1 時目標份額為 1（一對一必回）', () => {
+    expect(calculateTarget(1)).toBeCloseTo(1, 4)
+  })
+
+  test('activeMembers = 4 時目標份額為 1/4', () => {
+    expect(calculateTarget(4)).toBeCloseTo(0.25, 4)
   })
 
   test('activeMembers = 0 時目標份額為 1', () => {
     expect(calculateTarget(0)).toBeCloseTo(1, 4)
   })
 
-  test('activeMembers = 9 時目標份額為 1/10', () => {
-    expect(calculateTarget(9)).toBeCloseTo(0.1, 4)
+  test('activeMembers = 10 時目標份額為 1/10', () => {
+    expect(calculateTarget(10)).toBeCloseTo(0.1, 4)
+  })
+
+  test('minTarget 地板：activeMembers = 20 + minTarget = 0.1 → 0.1', () => {
+    expect(calculateTarget(20, 0.1)).toBeCloseTo(0.1, 4)
+  })
+
+  test('minTarget 不影響小群組：activeMembers = 5 + minTarget = 0.1 → 0.2', () => {
+    expect(calculateTarget(5, 0.1)).toBeCloseTo(0.2, 4)
+  })
+
+  test('minTarget = 0 時無下限', () => {
+    expect(calculateTarget(100, 0)).toBeCloseTo(0.01, 4)
   })
 })
 

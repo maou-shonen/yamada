@@ -67,6 +67,8 @@ const configSchema = z.object({
   FREQUENCY_SHORT_HALFLIFE_HOURS: z.coerce.number().positive().default(4),
   /** 計算活躍人數的時間窗口（天） */
   FREQUENCY_ACTIVE_WINDOW_DAYS: z.coerce.number().int().positive().default(7),
+  /** 公平份額下限：大型群組的最低 target（0~1），預設 10% */
+  FREQUENCY_MIN_TARGET: z.coerce.number().min(0).max(1).default(0.1),
   // ── Scheduler — 排程器輪詢設定 ──
 
   /** 排程器輪詢間隔（ms），控制檢查 pending triggers 的頻率 */

@@ -47,7 +47,7 @@ describe('checkFrequency', () => {
       countActiveMembers: () => 4,
     })
 
-    expect(result.metadata.target).toBeCloseTo(0.2, 4)
+    expect(result.metadata.target).toBeCloseTo(0.25, 4)
     expect(result.probability).toBeLessThan(0.3)
     expect(result.shouldRespond).toBeFalse()
     expect(result.metadata.reason).toBe('probability_gate')
@@ -71,7 +71,7 @@ describe('checkFrequency', () => {
       countActiveMembers: () => 4,
     })
 
-    expect(result.metadata.target).toBeCloseTo(0.2, 4)
+    expect(result.metadata.target).toBeCloseTo(0.25, 4)
     expect(result.probability).toBeGreaterThan(0.7)
     expect(result.shouldRespond).toBeTrue()
     expect(result.metadata.reason).toBe('pass')
@@ -129,5 +129,49 @@ describe('checkFrequency', () => {
       isMention: false,
       reason: expect.any(String),
     })
+  })
+
+  test('solo_chat bypass：activeMembers = 1 時無條件通過', () => {
+    const { db } = setupTestDb()
+
+    const result = checkFrequency(db, createTestConfig(), false, {
+      now: () => 1_700_000_000_000,
+      random: () => 0.99,
+      countActiveMembers: () => 1,
+    })
+
+    expect(result.shouldRespond).toBeTrue()
+    expect(result.probability).toBe(1)
+    expect(result.metadata.reason).toBe('solo_chat')
+    expect(result.metadata.activeMembers).toBe(1)
+    expect(result.metadata.target).toBe(1)
+  })
+
+  test('solo_chat bypass：activeMembers = 0 時也無條件通過', () => {
+    const { db } = setupTestDb()
+
+    const result = checkFrequency(db, createTestConfig(), false, {
+      now: () => 1_700_000_000_000,
+      random: () => 0.99,
+      countActiveMembers: () => 0,
+    })
+
+    expect(result.shouldRespond).toBeTrue()
+    expect(result.probability).toBe(1)
+    expect(result.metadata.reason).toBe('solo_chat')
+  })
+
+  test('minTarget 生效：大型群組 target 不低於設定值', () => {
+    const { db } = setupTestDb()
+    const config = createTestConfig({ FREQUENCY_MIN_TARGET: 0.1 })
+
+    const result = checkFrequency(db, config, false, {
+      now: () => 1_700_000_000_000,
+      random: () => 0.5,
+      countActiveMembers: () => 50,
+    })
+
+    // 1/50 = 0.02，但 minTarget = 0.1 拉高為 0.1
+    expect(result.metadata.target).toBeCloseTo(0.1, 4)
   })
 })

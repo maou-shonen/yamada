@@ -39,6 +39,7 @@ export function createTestConfig(overrides: Partial<Config> = {}): Config {
     FREQUENCY_LONG_HALFLIFE_HOURS: 120,
     FREQUENCY_SHORT_HALFLIFE_HOURS: 4,
     FREQUENCY_ACTIVE_WINDOW_DAYS: 7,
+    FREQUENCY_MIN_TARGET: 0.1,
 
     // ── Scheduler ──
     SCHEDULER_POLL_INTERVAL_MS: 2000,

@@ -56,6 +56,7 @@ describe('loadConfig', () => {
       expect(config.FREQUENCY_LONG_HALFLIFE_HOURS).toBe(120)
       expect(config.FREQUENCY_SHORT_HALFLIFE_HOURS).toBe(4)
       expect(config.FREQUENCY_ACTIVE_WINDOW_DAYS).toBe(7)
+      expect(config.FREQUENCY_MIN_TARGET).toBe(0.1)
     })
 
     test('可透過環境變數覆寫', () => {
@@ -67,6 +68,7 @@ describe('loadConfig', () => {
       expect(config.FREQUENCY_LONG_HALFLIFE_HOURS).toBe(48)
       expect(config.FREQUENCY_SHORT_HALFLIFE_HOURS).toBe(4)
       expect(config.FREQUENCY_ACTIVE_WINDOW_DAYS).toBe(7)
+      expect(config.FREQUENCY_MIN_TARGET).toBe(0.1)
     })
 
     test('FREQUENCY_ENABLED 支援 "1" 為 true', () => {
