@@ -2,23 +2,13 @@
   "name": "yamada",
   "type": "module",
   "private": true,
-  "scripts": {
-    "dev": "bun run --watch src/index.ts",
-    "dev:discord": "bun run --watch src/discord/index.ts",
-    "dev:line": "bun run --watch src/line/index.ts",
-    "lint": "eslint .",
-    "lint:fix": "eslint . --fix",
-    "typecheck": "tsc --noEmit",
-    "test": "bun test",
-    "test:integration": "bun test src/__tests__/integration/",
-    "test:e2e": "bun test src/__tests__/e2e/",
-    "db:generate": "drizzle-kit generate",
-    "db:push": "drizzle-kit push"
-  },
+  "scripts": {},
   "peerDependencies": {
     "typescript": "^5"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.49",
+    "@ai-sdk/google": "^3.0.33",
     "@ai-sdk/openai": "^3.0.29",
     "@line/bot-sdk": "^10.6.0",
     "@loglayer/transport-log-file-rotation": "^3.0.2",
@@ -36,6 +26,7 @@
     "@types/bun": "^1.3.9",
     "drizzle-kit": "^0.31.9",
     "eslint": "^9.39.2",
-    "eslint-plugin-format": "^1.4.0"
+    "eslint-plugin-format": "^1.4.0",
+    "portless": "^0.4.2"
   }
 }

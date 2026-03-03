@@ -1,3 +1,4 @@
+import type { ProviderName } from '../lib/provider.ts'
 import process from 'node:process'
 import { z } from 'zod'
 import { DEFAULT_SOUL } from './soul.ts'
@@ -8,16 +9,27 @@ import { DEFAULT_SOUL } from './soul.ts'
 // ────────────────────────────────────────────
 
 const configSchema = z.object({
-  // ── 秘密憑證（平台啟用由這些欄位的有無自動判斷） ──
+  // ── 平台憑證（平台啟用由這些欄位的有無自動判斷） ──
 
   DISCORD_TOKEN: z.string().min(1).optional(),
   DISCORD_CLIENT_ID: z.string().min(1).optional(),
   LINE_CHANNEL_SECRET: z.string().min(1).optional(),
   LINE_CHANNEL_ACCESS_TOKEN: z.string().min(1).optional(),
-  AI_BASE_URL: z.string().url().optional(),
-  AI_API_KEY: z.string().min(1).optional(),
-  EMBEDDING_BASE_URL: z.string().url().optional(),
-  EMBEDDING_API_KEY: z.string().min(1).optional(),
+
+  // ── Per-provider AI 憑證（各 provider 獨立設定，只需設定你使用的 provider） ──
+  // 若未設 API_KEY，各 SDK 會自動讀取對應的環境變數（OPENAI_API_KEY、ANTHROPIC_API_KEY 等）
+  // BASE_URL 可選，不設定則使用各 provider 的官方預設端點
+
+  OPENAI_API_KEY: z.string().min(1).optional(),
+  OPENAI_BASE_URL: z.string().url().optional(),
+  ANTHROPIC_API_KEY: z.string().min(1).optional(),
+  ANTHROPIC_BASE_URL: z.string().url().optional(),
+  GOOGLE_API_KEY: z.string().min(1).optional(),
+  GOOGLE_BASE_URL: z.string().url().optional(),
+  OPENROUTER_API_KEY: z.string().min(1).optional(),
+  OPENROUTER_BASE_URL: z.string().url().optional(),
+  OPENCODE_API_KEY: z.string().min(1).optional(),
+  OPENCODE_BASE_URL: z.string().url().optional(),
 
   // ── 人格與基本設定 ──
 
@@ -32,19 +44,17 @@ const configSchema = z.object({
   /** Health check endpoint 監聽埠（當 LINE 未啟用時使用） */
   HEALTH_PORT: z.coerce.number().int().min(0).max(65535).default(3000),
 
-  // ── AI 模型 ──
+  // ── AI 模型（格式：provider/model-name，逗號分隔支援 fallback） ──
 
-  /** AI provider 名稱，對應 Vercel AI SDK 的 provider registry */
-  AI_PROVIDER: z.string().min(1).default('openai'),
-  /** 對話生成模型 ID */
-  AI_MODEL: z.string().min(1).default('gpt-4o-mini'),
-  /** Observer 摘要壓縮用的模型 ID */
-  OBSERVER_MODEL: z.string().min(1).default('gpt-4o-mini'),
+  /** 聊天模型，格式：provider/model（逗號分隔 = fallback） */
+  CHAT_MODEL: z.string().min(1).default('openrouter/x-ai/grok-4.1-fast,openrouter/deepseek/deepseek-v3.2'),
+  /** Observer 摘要壓縮用模型，格式同 CHAT_MODEL */
+  OBSERVER_MODEL: z.string().min(1).default('openrouter/x-ai/grok-4.1-fast,openrouter/deepseek/deepseek-v3.2'),
 
   // ── Embedding ──
 
-  /** Embedding 模型 ID */
-  EMBEDDING_MODEL: z.string().min(1).default('text-embedding-3-small'),
+  /** Embedding 模型 ID，格式：provider/model */
+  EMBEDDING_MODEL: z.string().min(1).default('openai/text-embedding-3-small'),
   /** 向量維度，需與模型輸出維度一致 */
   EMBEDDING_DIMENSIONS: z.coerce.number().int().positive().default(1536),
 
@@ -146,6 +156,13 @@ const configSchema = z.object({
  * @param env - 環境變數來源（預設為 process.env，測試時可傳入自訂物件）
  */
 export function loadConfig(env: Record<string, string | undefined> = process.env) {
+  // Portless 啟動時注入 PORT env var（隨機 4000-4999）；
+  // 若 LINE_WEBHOOK_PORT / HEALTH_PORT 未明確設定，使用 PORT 作為 fallback
+  if (env.PORT) {
+    env.LINE_WEBHOOK_PORT ??= env.PORT
+    env.HEALTH_PORT ??= env.PORT
+  }
+
   const config = configSchema.parse(env)
 
   return {
@@ -154,16 +171,18 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     // ── 計算屬性（由憑證有無自動判斷） ──
     discordEnabled: !!(config.DISCORD_TOKEN && config.DISCORD_CLIENT_ID),
     lineEnabled: !!(config.LINE_CHANNEL_SECRET && config.LINE_CHANNEL_ACCESS_TOKEN),
-    // embedding 啟用條件：有任何可用的 API 憑證即可。
-    // createEmbeddingProvider fallback 鏈：EMBEDDING_* → AI_* → defaultOpenAI（讀 OPENAI_API_KEY）。
-    // 因此只設 OPENAI_API_KEY（最常見場景）時也應啟用。
-    embeddingEnabled: !!(
-      config.EMBEDDING_BASE_URL
-      || config.EMBEDDING_API_KEY
-      || config.AI_BASE_URL
-      || config.AI_API_KEY
-      || env.OPENAI_API_KEY
-    ),
+    // embedding 啟用條件：EMBEDDING_MODEL 的 provider 有對應 API 憑證。
+    embeddingEnabled: (() => {
+      const provider = config.EMBEDDING_MODEL.split('/')[0] as ProviderName
+      switch (provider) {
+        case 'openai': return !!(config.OPENAI_API_KEY || config.OPENAI_BASE_URL)
+        case 'anthropic': return !!(config.ANTHROPIC_API_KEY || config.ANTHROPIC_BASE_URL)
+        case 'google': return !!(config.GOOGLE_API_KEY || config.GOOGLE_BASE_URL)
+        case 'openrouter': return !!(config.OPENROUTER_API_KEY || config.OPENROUTER_BASE_URL)
+        case 'opencode-zen': return !!(config.OPENCODE_API_KEY || config.OPENCODE_BASE_URL)
+        default: return false
+      }
+    })(),
   }
 }
 

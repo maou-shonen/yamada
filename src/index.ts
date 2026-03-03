@@ -6,12 +6,7 @@ import { DiscordChannel } from './discord/channel'
 import { LineChannel } from './line/channel'
 import { log } from './logger'
 
-/**
- * 可注入的選項（測試時用 mock 替換）
- *
- * 注意：此入口會同時啟動所有已設定的平台。
- * 若只需單一平台，請使用 src/discord/index.ts 或 src/line/index.ts。
- */
+/** 可注入的選項（測試時用 mock 替換） */
 export interface MainOptions {
   /** 測試時可注入 mock channel，不需要 mock.module() */
   discord?: PlatformChannel
@@ -21,10 +16,7 @@ export interface MainOptions {
 }
 
 /**
- * 雙平台入口（向後相容）
- *
- * 啟動所有已設定的平台 channels。
- * 生產環境建議改用 src/discord/index.ts 或 src/line/index.ts 分別啟動。
+ * 統一入口——根據環境變數自動啟用已設定的平台（Discord / LINE）。
  */
 async function main(options?: MainOptions): Promise<() => Promise<void>> {
   log.info('Loading config...')
@@ -38,8 +30,7 @@ async function main(options?: MainOptions): Promise<() => Promise<void>> {
 
   log.withMetadata({
     platforms: enabledPlatforms.length > 0 ? enabledPlatforms : '(none)',
-    aiProvider: config.AI_PROVIDER,
-    aiModel: config.AI_MODEL,
+    chatModel: config.CHAT_MODEL,
   }).info('Config loaded')
 
   const app = await bootstrap(config, { dbDir: options?.dbDir })

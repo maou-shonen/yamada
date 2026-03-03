@@ -54,28 +54,30 @@ HTTP Webhook（`Bun.serve`），接收 `POST /webhook/line`。
 
 ### 平台差異摘要
 
-| | Discord | LINE |
-| --- | --- | --- |
-| 連線方式 | WebSocket Gateway（長連線） | Webhook HTTP server（`Bun.serve`） |
-| groupId | guild mode: server id / channel mode: channel id | `event.source.groupId` |
-| mention 判定 | `message.mentions.users.has(bot)` \|\| `@everyone` | `mentionees` 含 bot userId |
-| 回覆機制 | `channel.send()` | replyToken 優先（免費）→ fallback pushMessage（有配額） |
-| reaction | 原生 emoji reaction | 不支援（靜默忽略） |
-| DM 處理 | 靜默丟棄 | 回覆「不支援私訊」後丟棄 |
-| 內容類型 | 文字 / 附件 / 貼圖 | 文字 / 貼圖 / 圖片 / 影片 / 音訊 / 檔案 / 位置 |
+|              | Discord                                            | LINE                                                    |
+| ------------ | -------------------------------------------------- | ------------------------------------------------------- |
+| 連線方式     | WebSocket Gateway（長連線）                        | Webhook HTTP server（`Bun.serve`）                      |
+| groupId      | guild mode: server id / channel mode: channel id   | `event.source.groupId`                                  |
+| mention 判定 | `message.mentions.users.has(bot)` \|\| `@everyone` | `mentionees` 含 bot userId                              |
+| 回覆機制     | `channel.send()`                                   | replyToken 優先（免費）→ fallback pushMessage（有配額） |
+| reaction     | 原生 emoji reaction                                | 不支援（靜默忽略）                                      |
+| DM 處理      | 靜默丟棄                                           | 回覆「不支援私訊」後丟棄                                |
+| 內容類型     | 文字 / 附件 / 貼圖                                 | 文字 / 貼圖 / 圖片 / 影片 / 音訊 / 檔案 / 位置          |
 
 ## 指令
 
+本專案使用 [mise](https://mise.jdx.dev/) 管理工具版本與執行腳本（見 `mise.toml`）。
+
 ```bash
-bun run dev              # 啟動雙平台（Discord + LINE）
-bun run dev:discord      # 僅 Discord
-bun run dev:line         # 僅 LINE
-bun run lint:fix         # ESLint 自動修復 + 格式化
-bun run typecheck        # tsc --noEmit
-bun test                 # 全部測試（單元 + 整合 + E2E）
+mise run dev               # 啟動開發伺服器（自動偵測已設定的平台）
+mise run fix               # ESLint 自動修復 + 格式化
+mise run typecheck         # tsc --noEmit
+mise run check             # lint + typecheck 並行
+mise run test              # 全部測試（單元 + 整合 + E2E）
+mise run ci                # 完整 CI 流程（check + test）
 ```
 
-- Runtime: **Bun**（不是 Node.js，用 `bun test`、`bun run`）
+- Runtime: **Bun**（由 mise 管理版本，見 `mise.toml` 的 `[tools]`）
 - AI: Vercel AI SDK + OpenAI-compatible
 - DB: Drizzle ORM + SQLite（`bun:sqlite`）、sqlite-vec 向量搜尋
 - 平台: discord.js、@line/bot-sdk

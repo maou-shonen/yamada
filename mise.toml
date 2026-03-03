@@ -1,0 +1,115 @@
+# ──────────────────────────────────────────────
+# yamada (山田) — mise 開發環境設定
+# ──────────────────────────────────────────────
+# 使用方式：mise install && mise run <task>
+# 查看所有任務：mise tasks
+
+min_version = "2025.1.0"
+
+# ── 設定 ──────────────────────────────────────
+
+[settings]
+task_output = "interleave" # 長時間任務的輸出直接串流顯示
+
+# ── 工具版本 ──────────────────────────────────
+
+[tools]
+bun = "1.3.10"
+
+# ── 環境變數 ──────────────────────────────────
+
+[env]
+_.file = ".env" # 自動載入 .env（存在時）
+_.path = [ "./node_modules/.bin" ] # 讓 eslint、tsc、drizzle-kit 等可直接呼叫
+
+# ── Hooks ─────────────────────────────────────
+
+[hooks]
+enter = "mise install -q" # 進入專案目錄時自動安裝缺少的工具
+
+# ── 開發伺服器 ────────────────────────────────
+
+[tasks.dev]
+description = "啟動開發伺服器（自動偵測已設定的平台），含 watch 自動重載 → http://yamada.localhost:1355"
+run = "portless yamada bun run --watch src/index.ts"
+
+# ── 程式碼品質 ────────────────────────────────
+
+[tasks.lint]
+description = "ESLint 靜態分析"
+run = "eslint ."
+sources = [
+  "src/**/*.ts",
+  "eslint.config.js"
+]
+outputs = { auto = true }
+
+[tasks.fix]
+alias = "lint:fix"
+description = "ESLint 自動修復 + 格式化"
+run = "eslint . --fix"
+
+[tasks.typecheck]
+alias = "tc"
+description = "TypeScript 型別檢查（tsc --noEmit）"
+run = "tsc --noEmit"
+sources = [
+  "src/**/*.ts",
+  "tsconfig.json"
+]
+outputs = { auto = true }
+
+[tasks.check]
+description = "完整靜態檢查（lint + typecheck 並行）"
+depends = [
+  "lint",
+  "typecheck"
+]
+
+# ── 測試 ──────────────────────────────────────
+
+[tasks.test]
+description = "執行全部測試"
+run = "bun test"
+sources = [ "src/**/*.ts" ]
+
+[tasks."test:integration"]
+description = "僅執行整合測試"
+run = "bun test src/__tests__/integration/"
+sources = [ "src/**/*.ts" ]
+
+[tasks."test:e2e"]
+description = "僅執行 E2E 測試"
+run = "bun test src/__tests__/e2e/"
+sources = [ "src/**/*.ts" ]
+
+# ── CI ────────────────────────────────────────
+
+[tasks.ci]
+description = "CI 完整流程：靜態檢查 + 全部測試"
+depends = [
+  "check",
+  "test"
+]
+
+# ── 依賴管理 ──────────────────────────────────
+
+[tasks.install]
+alias = "i"
+description = "安裝 npm 依賴"
+run = "bun install"
+sources = [
+  "package.json",
+  "bun.lock"
+]
+outputs = { auto = true }
+
+# ── 資料庫 ────────────────────────────────────
+
+[tasks."db:generate"]
+description = "Drizzle 產生 migration 檔案"
+run = "drizzle-kit generate"
+
+[tasks."db:push"]
+description = "Drizzle 推送 schema 到資料庫"
+run = "drizzle-kit push"
