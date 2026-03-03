@@ -28,7 +28,7 @@ describe('generateReply', () => {
   function createFakeDeps(toolCalls: Array<{ toolName: string, input: Record<string, unknown> }> = [
     { toolName: 'reply', input: { content: '你好，這是測試回覆' } },
   ]) {
-    const createModelMock = mock((config: Config) => ({ model: config.AI_MODEL }))
+    const createModelMock = mock((modelId: string, _config: Config) => ({ modelId }))
     const generateTextMock = mock(async () => fakeGenerateTextResult(toolCalls))
 
     const deps: GeneratorDeps = {
@@ -113,14 +113,14 @@ describe('generateReply', () => {
     })
   })
 
-  test('使用 config 中的 aiModel 建立模型', async () => {
-    const config = createTestConfig({ AI_PROVIDER: 'openai', AI_MODEL: 'gpt-4o', OBSERVER_MODEL: 'gpt-4o-mini' })
+  test('使用 CHAT_MODEL 中的 model ID 建立模型', async () => {
+    const config = createTestConfig({ CHAT_MODEL: 'openai/gpt-4o' })
     const messages = [{ role: 'user' as const, content: '你好' }]
     const { deps, createModelMock } = createFakeDeps()
 
     await generateReply(messages, config, deps)
 
-    expect(createModelMock).toHaveBeenCalledWith(config)
+    expect(createModelMock).toHaveBeenCalledWith('openai/gpt-4o', config)
   })
 
   test('傳入 tools 和 toolChoice: required', async () => {
@@ -147,5 +147,49 @@ describe('generateReply', () => {
     const messages = [{ role: 'user' as const, content: '你好' }]
 
     await expect(generateReply(messages, config)).rejects.toThrow()
+  })
+
+  test('fallback：第一個模型失敗時自動嘗試第二個', async () => {
+    const config = createTestConfig({ CHAT_MODEL: 'openai/model-a,openai/model-b' })
+    const messages = [{ role: 'user' as const, content: '你好' }]
+
+    let callCount = 0
+    const generateTextMock = mock(async () => {
+      callCount++
+      if (callCount === 1) {
+        throw new Error('model-a failed')
+      }
+      return fakeGenerateTextResult([{ toolName: 'reply', input: { content: 'fallback 成功' } }])
+    })
+    const createModelMock = mock((modelId: string, _config: Config) => ({ modelId }))
+
+    const deps: GeneratorDeps = {
+      createModel: createModelMock as unknown as GeneratorDeps['createModel'],
+      generateText: generateTextMock as unknown as GeneratorDeps['generateText'],
+    }
+
+    const result = await generateReply(messages, config, deps)
+
+    expect(result.actions).toEqual([{ type: 'reply', content: 'fallback 成功' }])
+    expect(createModelMock).toHaveBeenCalledTimes(2)
+    expect(createModelMock.mock.calls[0]).toEqual(['openai/model-a', config])
+    expect(createModelMock.mock.calls[1]).toEqual(['openai/model-b', config])
+  })
+
+  test('fallback：所有模型都失敗時拋出最後一個錯誤', async () => {
+    const config = createTestConfig({ CHAT_MODEL: 'openai/model-a,openai/model-b' })
+    const messages = [{ role: 'user' as const, content: '你好' }]
+
+    const generateTextMock = mock(async () => {
+      throw new Error('all models failed')
+    })
+    const createModelMock = mock((modelId: string, _config: Config) => ({ modelId }))
+
+    const deps: GeneratorDeps = {
+      createModel: createModelMock as unknown as GeneratorDeps['createModel'],
+      generateText: generateTextMock as unknown as GeneratorDeps['generateText'],
+    }
+
+    await expect(generateReply(messages, config, deps)).rejects.toThrow('all models failed')
   })
 })

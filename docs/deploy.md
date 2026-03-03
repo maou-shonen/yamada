@@ -35,12 +35,12 @@ docker build -t yamada .
 
 #### 需設定的 Secrets / Variables
 
-| 類型     | 名稱                | 說明                     |
-| -------- | ------------------- | ------------------------ |
-| Secret   | `REGISTRY_URL`      | Registry 位址            |
-| Secret   | `REGISTRY_USERNAME` | Registry 帳號            |
-| Secret   | `REGISTRY_PASSWORD` | Registry 密碼            |
-| Variable | `REGISTRY_IMAGE`    | 映像名稱（預設 `yamada`）|
+| 類型     | 名稱                | 說明                      |
+| -------- | ------------------- | ------------------------- |
+| Secret   | `REGISTRY_URL`      | Registry 位址             |
+| Secret   | `REGISTRY_USERNAME` | Registry 帳號             |
+| Secret   | `REGISTRY_PASSWORD` | Registry 密碼             |
+| Variable | `REGISTRY_IMAGE`    | 映像名稱（預設 `yamada`） |
 
 每次構建產生兩個 tag：
 
@@ -68,10 +68,10 @@ services:
 
 容器內兩個目錄需掛載至 host：
 
-| 容器路徑     | 內容                                              | 重要性 |
-| ------------ | ------------------------------------------------- | ------ |
-| `/app/data`  | `groups/*.db`（per-group 訊息/摘要/向量）+ `main.db`（排程器） | 關鍵   |
-| `/app/logs`  | 日誌輪替檔案                                       | 建議   |
+| 容器路徑    | 內容                                                           | 重要性 |
+| ----------- | -------------------------------------------------------------- | ------ |
+| `/app/data` | `groups/*.db`（per-group 訊息/摘要/向量）+ `main.db`（排程器） | 關鍵   |
+| `/app/logs` | 日誌輪替檔案                                                   | 建議   |
 
 **建議使用 bind mount**（`./data:/app/data`），不使用 named volume，方便直接存取與備份。
 
@@ -88,16 +88,16 @@ SQLite 使用 WAL mode，備份時需包含 `.db-wal` 和 `.db-shm` 檔案。
 
 | 平台    | 方向     | 說明                                                  |
 | ------- | -------- | ----------------------------------------------------- |
-| Discord | Outbound | WebSocket 長連線，不需開放任何 port                    |
+| Discord | Outbound | WebSocket 長連線，不需開放任何 port                   |
 | LINE    | Inbound  | Webhook 需要 **HTTPS** 公開 URL，指向容器的 port 3000 |
 
 ### LINE Webhook 入口方案
 
-| 方案               | 適用情境                | 說明                                     |
-| ------------------ | ----------------------- | ---------------------------------------- |
-| Cloudflare Tunnel  | 無公網 IP / 不想開 port | `cloudflared tunnel` 指向 `localhost:3000`，免費 |
-| Reverse Proxy      | 有公網 IP + 域名        | Caddy / Nginx，Caddy 可自動 HTTPS        |
-| Tailscale Funnel   | 已在用 Tailscale        | 一行指令開 HTTPS                          |
+| 方案              | 適用情境                | 說明                                             |
+| ----------------- | ----------------------- | ------------------------------------------------ |
+| Cloudflare Tunnel | 無公網 IP / 不想開 port | `cloudflared tunnel` 指向 `localhost:3000`，免費 |
+| Reverse Proxy     | 有公網 IP + 域名        | Caddy / Nginx，Caddy 可自動 HTTPS                |
+| Tailscale Funnel  | 已在用 Tailscale        | 一行指令開 HTTPS                                 |
 
 ## 環境變數
 
@@ -114,6 +114,6 @@ LOG_DIR=/app/logs
 
 | 資源 | 建議       | 說明                                      |
 | ---- | ---------- | ----------------------------------------- |
-| CPU  | 1 vCPU     | 大部分時間 idle，等待 debounce / API 回應  |
+| CPU  | 1 vCPU     | 大部分時間 idle，等待 debounce / API 回應 |
 | RAM  | 256–512 MB | Bun runtime + SQLite 快取                 |
 | Disk | 依群組數   | 每個活躍群組 DB 約數十 MB（向量索引為主） |

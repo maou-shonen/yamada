@@ -15,7 +15,7 @@ import * as schema from './schema'
 /** 測試用 Config（4 維向量，簡化測試） */
 const mockConfig = createTestConfig({
   embeddingEnabled: true,
-  EMBEDDING_MODEL: 'text-embedding-3-small',
+  EMBEDDING_MODEL: 'openai/text-embedding-3-small',
   EMBEDDING_DIMENSIONS: 4,
 })
 

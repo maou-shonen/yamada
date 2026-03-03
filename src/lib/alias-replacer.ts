@@ -27,7 +27,8 @@ export function replaceUserIdsWithAliases(
   text: string,
   aliasMap: Map<string, string>,
 ): string {
-  if (aliasMap.size === 0) return text
+  if (aliasMap.size === 0)
+    return text
 
   // 按長度降序排序，防止短 key 部分匹配長 key
   const sortedKeys = Array.from(aliasMap.keys()).sort(
@@ -37,7 +38,7 @@ export function replaceUserIdsWithAliases(
   // 逃脫 regex 特殊字元
   const escapedKeys = sortedKeys.map(key => key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
 
-  // 單次 regex 交替：^(key1|key2|...): 
+  // 單次 regex 交替：^(key1|key2|...):
   const pattern = new RegExp(`^(${escapedKeys.join('|')}): `, 'gm')
 
   return text.replace(pattern, (match, userId) => {
@@ -65,7 +66,8 @@ export function replaceAliasesWithNames(
   text: string,
   reverseMap: Map<string, string>,
 ): string {
-  if (reverseMap.size === 0) return text
+  if (reverseMap.size === 0)
+    return text
 
   // 按長度降序排序
   const sortedKeys = Array.from(reverseMap.keys()).sort(

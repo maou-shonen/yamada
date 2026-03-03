@@ -1,3 +1,4 @@
+import type { EmbeddingModel } from 'ai'
 import type { Database } from 'bun:sqlite'
 import type { Config } from '../config'
 import type { StoredMessage } from '../types'
@@ -5,7 +6,7 @@ import type { DB } from './db'
 import { embed, embedMany } from 'ai'
 import { asc, gte, inArray } from 'drizzle-orm'
 import * as sqliteVec from 'sqlite-vec'
-import { createEmbeddingProvider } from '../lib/provider.ts'
+import { createEmbeddingModelFromId } from '../lib/provider.ts'
 import { log } from '../logger'
 import { buildChunks } from './chunking'
 import { getMaxChunkEndTimestamp, saveChunk } from './chunks'
@@ -16,13 +17,13 @@ const embeddingLog = log.withPrefix('[Embedding]')
 export interface EmbeddingDeps {
   embed: typeof import('ai').embed
   embedMany: typeof import('ai').embedMany
-  createEmbeddingModel: (modelName: string, config: Config) => ReturnType<ReturnType<typeof createEmbeddingProvider>['embedding']>
+  createEmbeddingModel: (modelId: string, config: Config) => EmbeddingModel
 }
 
 const defaultDeps: EmbeddingDeps = {
   embed,
   embedMany,
-  createEmbeddingModel: (modelName: string, config: Config) => createEmbeddingProvider(config).embedding(modelName),
+  createEmbeddingModel: createEmbeddingModelFromId,
 }
 
 const toVector = (values: number[]) => new Float32Array(values)

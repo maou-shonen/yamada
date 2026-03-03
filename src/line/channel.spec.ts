@@ -541,6 +541,27 @@ describe('LineChannel', () => {
     })
   })
 
+    test('replyMessage + pushMessage 都失敗 → throw error', async () => {
+      await channel.start()
+      const mockClient = createMockClient()
+      mockClient.replyMessage = mock(() =>
+        Promise.reject(new Error('Invalid reply token')),
+      )
+      mockClient.pushMessage = mock(() =>
+        Promise.reject(new Error('Push failed')),
+      )
+      injectMockClient(channel, mockClient)
+
+      // 透過 pool 存放新鮮的 token
+      const pool = (channel as unknown as { pool: ReplyTokenPool }).pool
+      pool.store('Cgroup123', 'bad-token')
+
+      // sendMessage 應該 throw pushMessage 的 error
+      expect(channel.sendMessage('Cgroup123', '測試')).rejects.toThrow(
+        'Push failed',
+      )
+    })
+
   describe('sendReaction', () => {
     test('不 throw，僅記錄 log', async () => {
       await channel.start()
@@ -686,6 +707,143 @@ describe('LineChannel', () => {
       // pool 已被清空，claim 應返回 null
       expect(pool.claim('Cgroup123')).toBeNull()
       expect(pool.claim('CgroupXYZ')).toBeNull()
+    })
+  })
+
+  describe('T5-LINE-EDGE: LINE 邊界案例', () => {
+    test('LE-1: 音訊訊息 → content 為 [音訊]', async () => {
+      await channel.start()
+      const mockClient = createMockClient()
+      injectMockClient(channel, mockClient)
+      const port = (channel as unknown as { server: { port: number } }).server.port
+
+      const received: UnifiedMessage[] = []
+      channel.onMessage = msg => received.push(msg)
+
+      const event = createGroupMessageEvent({ messageType: 'audio' })
+      await sendWebhook(port, { events: [event] }, config.LINE_CHANNEL_SECRET!)
+      await new Promise(r => setTimeout(r, 100))
+
+      expect(received[0].content).toBe('[音訊]')
+    })
+
+    test('LE-2: 檔案訊息 → content 為 [檔案]', async () => {
+      await channel.start()
+      const mockClient = createMockClient()
+      injectMockClient(channel, mockClient)
+      const port = (channel as unknown as { server: { port: number } }).server.port
+
+      const received: UnifiedMessage[] = []
+      channel.onMessage = msg => received.push(msg)
+
+      const event = createGroupMessageEvent({ messageType: 'file' })
+      await sendWebhook(port, { events: [event] }, config.LINE_CHANNEL_SECRET!)
+      await new Promise(r => setTimeout(r, 100))
+
+      expect(received[0].content).toBe('[檔案]')
+    })
+
+    test('LE-3: 位置訊息 → content 為 [位置]', async () => {
+      await channel.start()
+      const mockClient = createMockClient()
+      injectMockClient(channel, mockClient)
+      const port = (channel as unknown as { server: { port: number } }).server.port
+
+      const received: UnifiedMessage[] = []
+      channel.onMessage = msg => received.push(msg)
+
+      const event = createGroupMessageEvent({ messageType: 'location' })
+      await sendWebhook(port, { events: [event] }, config.LINE_CHANNEL_SECRET!)
+      await new Promise(r => setTimeout(r, 100))
+
+      expect(received[0].content).toBe('[位置]')
+    })
+
+    test('LE-4: 未知訊息類型 → content 為 [contact]', async () => {
+      await channel.start()
+      const mockClient = createMockClient()
+      injectMockClient(channel, mockClient)
+      const port = (channel as unknown as { server: { port: number } }).server.port
+
+      const received: UnifiedMessage[] = []
+      channel.onMessage = msg => received.push(msg)
+
+      const event = createGroupMessageEvent({ messageType: 'contact' })
+      await sendWebhook(port, { events: [event] }, config.LINE_CHANNEL_SECRET!)
+      await new Promise(r => setTimeout(r, 100))
+
+      expect(received[0].content).toBe('[contact]')
+    })
+
+    test('LE-5: 單次 webhook 帶多個事件 → 全部處理', async () => {
+      await channel.start()
+      const mockClient = createMockClient()
+      injectMockClient(channel, mockClient)
+      const port = (channel as unknown as { server: { port: number } }).server.port
+
+      const received: UnifiedMessage[] = []
+      channel.onMessage = msg => received.push(msg)
+
+      const event1 = createGroupMessageEvent({ text: 'Hello from user1', messageId: 'msg-001' })
+      const event2 = createGroupMessageEvent({ text: 'Hello from user2', userId: 'Uuser789', messageId: 'msg-002' })
+      const event3 = createGroupMessageEvent({ messageType: 'image', messageId: 'msg-003' })
+      await sendWebhook(port, { events: [event1, event2, event3] }, config.LINE_CHANNEL_SECRET!)
+      await new Promise(r => setTimeout(r, 100))
+
+      expect(received.length).toBe(3)
+      expect(received[0].content).toBe('Hello from user1')
+      expect(received[1].content).toBe('Hello from user2')
+      expect(received[2].content).toBe('[圖片]')
+    })
+
+    test('LE-6: 群組事件缺少 groupId → 不觸發 onMessage', async () => {
+      await channel.start()
+      const mockClient = createMockClient()
+      injectMockClient(channel, mockClient)
+      const port = (channel as unknown as { server: { port: number } }).server.port
+
+      const received: UnifiedMessage[] = []
+      channel.onMessage = msg => received.push(msg)
+
+      const event = {
+        type: 'message',
+        replyToken: 'test-reply-token',
+        source: {
+          type: 'group',
+          userId: 'Uuser456',
+        },
+        message: { type: 'text', id: 'msg-001', text: 'Hello' },
+        timestamp: Date.now(),
+      }
+      await sendWebhook(port, { events: [event] }, config.LINE_CHANNEL_SECRET!)
+      await new Promise(r => setTimeout(r, 100))
+
+      expect(received.length).toBe(0)
+    })
+
+    test('LE-7: 群組事件缺少 userId → 不觸發 onMessage', async () => {
+      await channel.start()
+      const mockClient = createMockClient()
+      injectMockClient(channel, mockClient)
+      const port = (channel as unknown as { server: { port: number } }).server.port
+
+      const received: UnifiedMessage[] = []
+      channel.onMessage = msg => received.push(msg)
+
+      const event = {
+        type: 'message',
+        replyToken: 'test-reply-token',
+        source: {
+          type: 'group',
+          groupId: 'Cgroup123',
+        },
+        message: { type: 'text', id: 'msg-001', text: 'Hello' },
+        timestamp: Date.now(),
+      }
+      await sendWebhook(port, { events: [event] }, config.LINE_CHANNEL_SECRET!)
+      await new Promise(r => setTimeout(r, 100))
+
+      expect(received.length).toBe(0)
     })
   })
 })

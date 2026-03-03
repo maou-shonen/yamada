@@ -164,3 +164,24 @@ test('deliverReaction 正常呼叫 sendReaction', async () => {
   expect(result.sendReactionCalls[0][1]).toBe('msg123')
   expect(result.sendReactionCalls[0][2]).toBe('❤️')
 })
+
+test('空 content → sendMessage 仍被呼叫，content 為空字串', async () => {
+  const content = ''
+  const result = makeMockChannel()
+
+  await deliverReply({
+    channel: result.channel,
+    groupId: 'group1',
+    content,
+    platform: 'discord',
+    config,
+  })
+
+  expect(result.sendMessageCalls.length).toBe(1)
+  expect(result.sendMessageCalls[0][0]).toBe('group1')
+  expect(result.sendMessageCalls[0][1]).toBe('')
+})
+
+
+
+

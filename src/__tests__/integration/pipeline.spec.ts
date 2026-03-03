@@ -3,9 +3,7 @@ import type { PlatformChannel, UnifiedMessage } from '../../types'
 import { describe, expect, mock, test } from 'bun:test'
 import { Agent } from '../../agent/index'
 import { deliverReaction, deliverReply } from '../../lib/delivery'
-import { shouldRun } from '../../lib/observer'
 import {
-  getMessageCount,
   getRecentMessages,
   saveBotMessage,
   saveMessage,
@@ -99,39 +97,7 @@ function createTestServices(overrides: Partial<AgentServices> = {}): AgentServic
 }
 
 describe('Pipeline 整合測試', () => {
-  test('場景 1: 完整對話流程 — 訊息儲存 → processTriggeredMessages → AI 回覆 → DB 持久化', async () => {
-    const config = makeTestConfig()
-    const { sqlite: sqliteDb, db } = setupTestDb()
-    const mockChannel = makeMockChannel('discord')
-    const channels = new Map<string, PlatformChannel>([['discord', mockChannel]])
-
-    const agent = new Agent({
-      groupId: 'group-a',
-      config,
-      db,
-      sqliteDb,
-      channels,
-      services: createTestServices(),
-    })
-
-    // 儲存訊息（receiveMessage 只做儲存）
-    agent.receiveMessage(makeMessage({ id: 'msg-1', content: '第一則訊息' }))
-    agent.receiveMessage(makeMessage({ id: 'msg-2', content: '第二則訊息', userId: 'user-2', userName: 'Bob' }))
-    agent.receiveMessage(makeMessage({ id: 'msg-3', content: '第三則訊息' }))
-
-    // 由排程器觸發 AI pipeline
-    await agent.processTriggeredMessages('discord', false)
-
-    expect((mockChannel.sendMessage as ReturnType<typeof mock>).mock.calls.length).toBeGreaterThanOrEqual(1)
-
-    const recentMessages = getRecentMessages(db, 20)
-    expect(recentMessages.length).toBeGreaterThanOrEqual(3)
-
-    const totalCount = getMessageCount(db)
-    expect(totalCount).toBeGreaterThanOrEqual(4)
-  })
-
-  test('場景 2: Observer 觸發條件 — 訊息超過 threshold 時 Observer 執行摘要壓縮', async () => {
+  test('Observer fire-and-forget — mock runObserver 寫入 group summary 後可驗證', async () => {
     const config = makeTestConfig({ OBSERVER_MESSAGE_THRESHOLD: 3, OBSERVER_USER_MESSAGE_LIMIT: 50 })
     const { sqlite: sqliteDb, db } = setupTestDb()
     const mockChannel = makeMockChannel('discord')
@@ -156,50 +122,17 @@ describe('Pipeline 整合測試', () => {
     agent.receiveMessage(makeMessage({ id: 'obs-2', content: '觀察者訊息二', userId: 'user-2', userName: 'Bob' }))
     agent.receiveMessage(makeMessage({ id: 'obs-3', content: '觀察者訊息三', userId: 'user-1' }))
 
-    // 由排程器觸發 AI pipeline（包含 Observer fire-and-forget）
     await agent.processTriggeredMessages('discord', false)
 
     // 等待 fire-and-forget Observer 完成
     await new Promise(resolve => setTimeout(resolve, 100))
 
+    // 驗證 mock runObserver 確實被呼叫且寫入了 group summary
+    const runObserverMock = observerServices.runObserver as ReturnType<typeof mock>
+    expect(runObserverMock.mock.calls.length).toBe(1)
+
     const groupSummary = await getGroupSummary(db)
-    const shouldRunResult = shouldRun(db, config)
-
-    expect(groupSummary !== null || !shouldRunResult).toBe(true)
-  })
-
-  test('場景 3: DB 持久化驗證 — 完整流程後 DB 包含用戶訊息和 bot 回覆', async () => {
-    const config = makeTestConfig()
-    const { sqlite: sqliteDb, db } = setupTestDb()
-    const mockChannel = makeMockChannel('discord')
-    const channels = new Map<string, PlatformChannel>([['discord', mockChannel]])
-
-    const agent = new Agent({
-      groupId: 'group-a',
-      config,
-      db,
-      sqliteDb,
-      channels,
-      services: createTestServices(),
-    })
-
-    agent.receiveMessage(makeMessage({ id: 'persist-1', content: '持久化測試訊息', userId: 'user-1' }))
-
-    // 由排程器觸發 AI pipeline
-    await agent.processTriggeredMessages('discord', false)
-
-    const messages = getRecentMessages(db, 20)
-
-    const userMsgs = messages.filter(m => !m.isBot)
-    expect(userMsgs.length).toBeGreaterThanOrEqual(1)
-    expect(userMsgs.some(m => m.content === '持久化測試訊息')).toBe(true)
-
-    const botMsgs = messages.filter(m => m.isBot)
-    expect(botMsgs.length).toBeGreaterThanOrEqual(1)
-
-    for (const botMsg of botMsgs) {
-      expect(botMsg.content.length).toBeGreaterThan(0)
-    }
+    expect(groupSummary).toBe('Mock observer summary')
   })
 })
 

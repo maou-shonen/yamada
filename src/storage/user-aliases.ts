@@ -1,7 +1,7 @@
 import type { DB } from './db'
 import { and, eq, inArray } from 'drizzle-orm'
-import * as schema from './schema'
 import { generateAlias } from './alias-generator'
+import * as schema from './schema'
 
 /**
  * 取得所有已存在的 alias 集合，供碰撞檢測使用。
@@ -27,7 +27,7 @@ export async function getOrCreateAlias(
   db: DB,
   userId: string,
   userName: string,
-): Promise<{ alias: string; userName: string }> {
+): Promise<{ alias: string, userName: string }> {
   // Bot 特例：不進 DB
   if (userId === 'bot') {
     return { alias: 'bot', userName }
@@ -75,7 +75,7 @@ export async function getOrCreateAlias(
 export async function getAliasMap(
   db: DB,
   userIds: string[],
-): Promise<Map<string, { alias: string; userName: string }>> {
+): Promise<Map<string, { alias: string, userName: string }>> {
   if (userIds.length === 0) {
     return new Map()
   }

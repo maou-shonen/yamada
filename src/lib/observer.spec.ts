@@ -96,6 +96,47 @@ describe('shouldRun', () => {
     expect(shouldRun(db, config)).toBe(true)
   })
 
+  test('threshold 邊界：訊息數恰好 = threshold → true', () => {
+    const { sqlite, db } = setupTestDb()
+    const config = makeConfig(5)
+    insertMessage(sqlite, { content: 'm1' })
+    insertMessage(sqlite, { content: 'm2' })
+    insertMessage(sqlite, { content: 'm3' })
+    insertMessage(sqlite, { content: 'm4' })
+    insertMessage(sqlite, { content: 'm5' })
+    expect(shouldRun(db, config)).toBe(true)
+  })
+
+  test('首次壓縮（無 group_summaries）：watermark=0，計算全部訊息', () => {
+    const { sqlite, db } = setupTestDb()
+    const config = makeConfig(3)
+    // 插入 3 則訊息，無 group_summaries 記錄
+    insertMessage(sqlite, { content: 'm1' })
+    insertMessage(sqlite, { content: 'm2' })
+    insertMessage(sqlite, { content: 'm3' })
+    // 應該計算全部 3 則訊息 → shouldRun true
+    expect(shouldRun(db, config)).toBe(true)
+  })
+
+  test('增量壓縮：只計算 watermark 之後的新訊息', () => {
+    const { sqlite, db } = setupTestDb()
+    const config = makeConfig(2)
+    // 插入舊訊息
+    const oldTs = Date.now() - 10000
+    insertMessage(sqlite, { content: 'm1', timestamp: oldTs })
+    insertMessage(sqlite, { content: 'm2', timestamp: oldTs + 1 })
+    // 插入 group summary，watermark = oldTs + 5000（在兩則舊訊息之後）
+    const watermarkTs = oldTs + 5000
+    sqlite.prepare(
+      `INSERT INTO group_summaries(id, summary, updated_at) VALUES(?, ?, ?)`,
+    ).run('gs1', 'Old summary', watermarkTs)
+    // 插入新訊息（在 watermark 之後）
+    insertMessage(sqlite, { content: 'm3', timestamp: watermarkTs + 1 })
+    insertMessage(sqlite, { content: 'm4', timestamp: watermarkTs + 2 })
+    // 只有 2 則新訊息 >= threshold(2) → shouldRun true
+    expect(shouldRun(db, config)).toBe(true)
+  })
+
   test('壓縮後（group summary 存在且 updatedAt 夠新）→ false', async () => {
     const { sqlite, db } = setupTestDb()
     const config = makeConfig(3)
@@ -129,6 +170,40 @@ describe('compressGroupSummary', () => {
     // 驗證 group summary 被儲存
     const saved = await getGroupSummary(db)
     expect(saved).toBe('Group summary text')
+  })
+
+  test('增量壓縮：compressGroupSummary 只收到 watermark 之後的訊息', async () => {
+    const { sqlite, db } = setupTestDb()
+    const config = makeConfig()
+    // 插入舊訊息
+    const oldTs = Date.now() - 10000
+    insertMessage(sqlite, { userId: 'u1', content: 'old msg 1', timestamp: oldTs })
+    insertMessage(sqlite, { userId: 'u1', content: 'old msg 2', timestamp: oldTs + 1 })
+    // 插入 group summary，watermark = oldTs + 5000
+    const watermarkTs = oldTs + 5000
+    sqlite.prepare(
+      `INSERT INTO group_summaries(id, summary, updated_at) VALUES(?, ?, ?)`,
+    ).run('gs1', 'Old summary', watermarkTs)
+    // 插入新訊息（在 watermark 之後）
+    insertMessage(sqlite, { userId: 'u1', content: 'new msg 1', timestamp: watermarkTs + 1 })
+    insertMessage(sqlite, { userId: 'u1', content: 'new msg 2', timestamp: watermarkTs + 2 })
+    
+    const { deps, generateTextMock } = createFakeDeps()
+    generateTextMock.mockImplementation(() => Promise.resolve({ text: 'Updated summary' }))
+    
+    await compressGroupSummary(db, watermarkTs, config, deps)
+    
+    // 驗證 generateText 被一作一次
+    expect(generateTextMock.mock.calls.length).toBe(1)
+    // 驗證傳入的 prompt 只包含新訊息（不包含舊訊息）
+    const callArgs = (generateTextMock.mock.calls as unknown as Array<[{ messages: Array<{ content: string }> }]>)[0]?.[0]
+    const promptContent = callArgs?.messages?.[0]?.content ?? ''
+    // 新訊息應該在 prompt 中
+    expect(promptContent).toContain('new msg 1')
+    expect(promptContent).toContain('new msg 2')
+    // 舊訊息不應該在 prompt 中（因為在 watermark 之前）
+    expect(promptContent).not.toContain('old msg 1')
+    expect(promptContent).not.toContain('old msg 2')
   })
 })
 
@@ -198,4 +273,19 @@ describe('runObserver', () => {
     // 1 group + 1 user (u1 only, bot excluded) = 2
     expect(generateTextMock.mock.calls.length).toBe(2)
   })
+
+  test('只有 bot 訊息達 threshold → userIds 為空 → 跳過 user summaries', async () => {
+    const { sqlite, db } = setupTestDb()
+    const config = makeConfig(2) // threshold = 2
+    const { deps, generateTextMock } = createFakeDeps()
+    // 只插入 bot 訊息
+    insertMessage(sqlite, { userId: 'bot', isBot: true, content: 'bot msg 1' })
+    insertMessage(sqlite, { userId: 'bot', isBot: true, content: 'bot msg 2' })
+    
+    await runObserver(db, config, deps)
+    
+    // 應該只一次記文本一次（group summary），不一次記文本 user summaries
+    expect(generateTextMock.mock.calls.length).toBe(1)
+  })
+
 })

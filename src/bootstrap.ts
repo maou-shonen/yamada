@@ -1,6 +1,8 @@
+import type { AgentServices } from './agent/index'
 import type { Config } from './config/index.ts'
 import type { Scheduler } from './scheduler/index'
 import type { PlatformChannel, UnifiedMessage } from './types'
+import { mkdirSync } from 'node:fs'
 import path from 'node:path'
 import { Agent } from './agent/index'
 import { log } from './logger'
@@ -33,6 +35,8 @@ export interface BootstrapOptions {
   mainDbPath?: string
   /** 測試時注入 fake scheduler factory */
   createScheduler?: typeof defaultCreateScheduler
+  /** 測試時注入 mock agent services（AI、storage 等） */
+  agentServices?: AgentServices
 }
 
 /**
@@ -48,6 +52,9 @@ export async function bootstrap(config: Config, options?: BootstrapOptions): Pro
   const dbDir = options?.dbDir ?? config.DB_DIR
   log.withMetadata({ dbDir }).info('Initializing GroupDbManager...')
   const manager = new GroupDbManager(dbDir)
+
+  // 確保 data/ 及 data/groups/ 目錄存在（recursive 會一次建立完整路徑）
+  mkdirSync(dbDir, { recursive: true })
 
   // 初始化全域 main.db（排程器用）
   const mainDbPath = options?.mainDbPath ?? path.join(path.dirname(dbDir), 'main.db')
@@ -75,6 +82,7 @@ export async function bootstrap(config: Config, options?: BootstrapOptions): Pro
       db,
       sqliteDb,
       channels,
+      services: options?.agentServices,
     })
     groupAgents.set(groupId, agent)
     return agent

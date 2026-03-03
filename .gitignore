@@ -34,9 +34,17 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .DS_Store
 
 # runtime data
-data/
+data/*
+!data/.gitkeep
+!data/groups/
+data/groups/*
+!data/groups/.gitkeep
 
 # agent working files
 .sisyphus/
 .sidecar/
 .tailscale/
+
+# mise local config (個人覆蓋用)
+.mise.local.toml
+mise.local.toml

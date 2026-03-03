@@ -7,8 +7,8 @@ import { log } from '../logger'
 import { getChunkContents } from '../storage/chunks'
 import { embedText, searchSimilarChunks } from '../storage/embedding'
 import { getGroupSummary, getUserSummariesForGroup } from '../storage/summaries'
-import { replaceUserIdsWithAliases } from './alias-replacer'
 import { getAliasMap } from '../storage/user-aliases'
+import { replaceUserIdsWithAliases } from './alias-replacer'
 
 const contextLog = log.withPrefix('[Context]')
 
@@ -18,7 +18,7 @@ export interface ContextDeps {
   embedText: typeof embedText
   searchSimilarChunks: typeof searchSimilarChunks
   getChunkContents: typeof getChunkContents
-  getAliasMap: (db: DB, userIds: string[]) => Promise<Map<string, { alias: string; userName: string }>>
+  getAliasMap: (db: DB, userIds: string[]) => Promise<Map<string, { alias: string, userName: string }>>
 }
 
 const defaultDeps: ContextDeps = {

@@ -2,6 +2,7 @@ import type { Database } from 'bun:sqlite'
 import type { Config } from '../config/index.ts'
 import type { DB } from '../storage/db'
 import type { PlatformChannel, UnifiedMessage } from '../types'
+import { replaceAliasesWithNames } from '../lib/alias-replacer'
 import { assembleContext } from '../lib/context'
 import { deliverReaction, deliverReply } from '../lib/delivery'
 import { generateReply } from '../lib/generator'
@@ -10,12 +11,11 @@ import { log } from '../logger'
 import { processNewChunks } from '../storage/embedding'
 import { getFrequencyState, saveFrequencyState } from '../storage/frequency-stats'
 import { getRecentMessages, saveBotMessage, saveMessage } from '../storage/messages'
+import { getAliasMap, getOrCreateAlias } from '../storage/user-aliases'
 import { recordActivity } from '../storage/user-stats'
 import { containsUrl, STICKER_CONTENT } from '../utils'
 import { checkFrequency } from './frequency-controller'
 import { calculateDecay, updateEma } from './frequency-math'
-import { replaceAliasesWithNames } from '../lib/alias-replacer'
-import { getAliasMap, getOrCreateAlias } from '../storage/user-aliases'
 
 export interface AgentServices {
   saveMessage: typeof saveMessage
@@ -29,8 +29,8 @@ export interface AgentServices {
   processNewChunks: typeof processNewChunks
   recordActivity: typeof recordActivity
   checkFrequency: typeof checkFrequency
-  getOrCreateAlias: (db: DB, userId: string, userName: string) => Promise<{ alias: string; userName: string }>
-  getAliasMap: (db: DB, userIds: string[]) => Promise<Map<string, { alias: string; userName: string }>>
+  getOrCreateAlias: (db: DB, userId: string, userName: string) => Promise<{ alias: string, userName: string }>
+  getAliasMap: (db: DB, userIds: string[]) => Promise<Map<string, { alias: string, userName: string }>>
 }
 
 const defaultServices: AgentServices = {

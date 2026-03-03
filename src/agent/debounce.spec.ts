@@ -130,3 +130,62 @@ test('flush 會立即觸發並清空 buffer', () => {
   jest.advanceTimersByTime(200)
   expect(onTrigger).toHaveBeenCalledTimes(1)
 })
+
+test('恰好達到 overflow 閾值 → 立即觸發', () => {
+  const onTrigger = jest.fn()
+  const debounce = new Debounce(
+    { silenceMs: 100, urgentMs: 50, overflowChars: 10 },
+    onTrigger,
+  )
+
+  const message = makeMessage('1234567890') // 恰好 10 字
+  debounce.push(message)
+
+  expect(onTrigger).toHaveBeenCalledTimes(1)
+  expect(onTrigger).toHaveBeenCalledWith([message])
+  expect(debounce.getBufferSize()).toBe(0)
+})
+
+test('零長度 content → push 不 crash，不觸發 overflow', () => {
+  const onTrigger = jest.fn()
+  const debounce = new Debounce(
+    { silenceMs: 100, urgentMs: 50, overflowChars: 10 },
+    onTrigger,
+  )
+
+  const message = makeMessage('')
+  debounce.push(message)
+
+  expect(onTrigger).not.toHaveBeenCalled()
+  expect(debounce.getBufferSize()).toBe(1)
+})
+
+test('flush 空 buffer → onTrigger 不被呼叫', () => {
+  const onTrigger = jest.fn()
+  const debounce = new Debounce(
+    { silenceMs: 100, urgentMs: 50, overflowChars: 3000 },
+    onTrigger,
+  )
+
+  debounce.flush()
+
+  expect(onTrigger).not.toHaveBeenCalled()
+  expect(debounce.getBufferSize()).toBe(0)
+})
+
+test('clear 取消已排程的計時器', () => {
+  const onTrigger = jest.fn()
+  const debounce = new Debounce(
+    { silenceMs: 100, urgentMs: 50, overflowChars: 3000 },
+    onTrigger,
+  )
+
+  const message = makeMessage('測試')
+  debounce.push(message)
+  debounce.clear()
+
+  jest.advanceTimersByTime(200)
+
+  expect(onTrigger).not.toHaveBeenCalled()
+  expect(debounce.getBufferSize()).toBe(0)
+})

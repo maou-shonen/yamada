@@ -1,41 +1,192 @@
+import type { EmbeddingModel, LanguageModel } from 'ai'
 import type { Config } from '../config/index.ts'
-import { createOpenAI, openai as defaultOpenAI } from '@ai-sdk/openai'
+import { createAnthropic } from '@ai-sdk/anthropic'
+import { createGoogleGenerativeAI } from '@ai-sdk/google'
+import { createOpenAI } from '@ai-sdk/openai'
 
-function createCustomProvider(baseUrl?: string, apiKey?: string) {
-  return createOpenAI({
-    ...(baseUrl && { baseURL: baseUrl }),
-    ...(apiKey && { apiKey }),
-  })
+// ── 支援的 provider 名稱 ──
+
+export const SUPPORTED_PROVIDERS = [
+  'openai',
+  'anthropic',
+  'google',
+  'openrouter',
+  'opencode-zen',
+] as const
+
+export type ProviderName = (typeof SUPPORTED_PROVIDERS)[number]
+
+// ── 需要覆蓋預設 base URL 的 provider ──
+
+const PROVIDER_BASE_URLS: Partial<Record<ProviderName, string>> = {
+  'openrouter': 'https://openrouter.ai/api/v1',
+  'opencode-zen': 'https://opencode.ai/zen/v1',
+}
+
+// ────────────────────────────────────────────
+// Model ID 解析
+// ────────────────────────────────────────────
+
+export interface ParsedModel {
+  provider: ProviderName
+  modelName: string
 }
 
 /**
- * 建立聊天用 provider，支援 self-hosted 和 proxy 端點。
+ * 解析 model ID 字串為 provider + modelName。
  *
- * WHY fallback chain：許多使用者透過 LiteLLM、Ollama 等 proxy 自架 OpenAI 相容端點，
- * 或使用 Azure/自訂雲端部署。Fallback 鏈讓他們設定自訂端點，同時保持零設定預設值
- * （直接讀取 OPENAI_API_KEY 使用官方 OpenAI）。
+ * 格式：`provider/model-name`
+ * - `openai/gpt-5` → { provider: 'openai', modelName: 'gpt-5' }
+ * - `openrouter/deepseek/deepseek-v3.2` → { provider: 'openrouter', modelName: 'deepseek/deepseek-v3.2' }
  */
-export function createProvider(config: Config) {
-  if (!config.AI_BASE_URL && !config.AI_API_KEY) {
-    return defaultOpenAI
+export function parseModelId(modelId: string): ParsedModel {
+  const slashIndex = modelId.indexOf('/')
+  if (slashIndex === -1) {
+    throw new Error(
+      `無效的 model ID 格式: "${modelId}"。預期格式: provider/model-name（例如 openai/gpt-4o）`,
+    )
   }
-  return createCustomProvider(config.AI_BASE_URL, config.AI_API_KEY)
+
+  const provider = modelId.slice(0, slashIndex)
+  const modelName = modelId.slice(slashIndex + 1)
+
+  if (!(SUPPORTED_PROVIDERS as readonly string[]).includes(provider)) {
+    throw new Error(
+      `不支援的 provider: "${provider}"。支援的 provider: ${SUPPORTED_PROVIDERS.join(', ')}`,
+    )
+  }
+
+  if (!modelName) {
+    throw new Error(
+      `無效的 model ID 格式: "${modelId}"。model 名稱不可為空`,
+    )
+  }
+
+  return { provider: provider as ProviderName, modelName }
 }
 
 /**
- * 建立 embedding 用 provider，支援獨立端點配置。
+ * 解析逗號分隔的 model 列表（支援 fallback）。
  *
- * WHY 獨立 provider：Embedding 模型常運行在不同基礎設施或端點上（如 Qdrant、Milvus、
- * 或專用 embedding 服務），與聊天模型分離。雙層 fallback（embedding→chat→default）
- * 讓使用者可細粒度配置（只設 embedding 端點、只設聊天端點、都設、都不設），
- * 或完全不設定而使用預設值。
+ * 格式：`provider/model[,provider/model,...]`
+ * 例如：`openrouter/x-ai/grok-4.1-fast,openrouter/deepseek/deepseek-v3.2`
  */
-export function createEmbeddingProvider(config: Config) {
-  const baseUrl = config.EMBEDDING_BASE_URL ?? config.AI_BASE_URL
-  const apiKey = config.EMBEDDING_API_KEY ?? config.AI_API_KEY
+export function parseModelList(models: string): ParsedModel[] {
+  return models.split(',').map(m => parseModelId(m.trim()))
+}
 
-  if (!baseUrl && !apiKey) {
-    return defaultOpenAI
+// ────────────────────────────────────────────
+// createModelFromId
+// ────────────────────────────────────────────
+
+/**
+ * 從 `provider/model-name` 格式的 model ID 建立語言模型。
+ *
+ * 根據 provider 前綴選擇 SDK，並讀取對應的 {PROVIDER}_API_KEY / {PROVIDER}_BASE_URL。
+ * 若未設定 API_KEY，各 SDK 會自動讀取對應環境變數（OPENAI_API_KEY、ANTHROPIC_API_KEY 等）。
+ */
+export function createModelFromId(modelId: string, config: Config): LanguageModel {
+  const { provider, modelName } = parseModelId(modelId)
+
+  switch (provider) {
+    case 'openai': {
+      const p = createOpenAI({
+        ...(config.OPENAI_BASE_URL && { baseURL: config.OPENAI_BASE_URL }),
+        ...(config.OPENAI_API_KEY && { apiKey: config.OPENAI_API_KEY }),
+      })
+      return p(modelName)
+    }
+
+    case 'anthropic': {
+      const p = createAnthropic({
+        ...(config.ANTHROPIC_BASE_URL && { baseURL: config.ANTHROPIC_BASE_URL }),
+        ...(config.ANTHROPIC_API_KEY && { apiKey: config.ANTHROPIC_API_KEY }),
+      })
+      return p(modelName)
+    }
+
+    case 'google': {
+      const p = createGoogleGenerativeAI({
+        ...(config.GOOGLE_BASE_URL && { baseURL: config.GOOGLE_BASE_URL }),
+        ...(config.GOOGLE_API_KEY && { apiKey: config.GOOGLE_API_KEY }),
+      })
+      return p(modelName)
+    }
+
+    case 'openrouter': {
+      const p = createOpenAI({
+        baseURL: config.OPENROUTER_BASE_URL ?? PROVIDER_BASE_URLS.openrouter,
+        ...(config.OPENROUTER_API_KEY && { apiKey: config.OPENROUTER_API_KEY }),
+      })
+      return p(modelName)
+    }
+
+    case 'opencode-zen': {
+      const p = createOpenAI({
+        baseURL: config.OPENCODE_BASE_URL ?? PROVIDER_BASE_URLS['opencode-zen'],
+        ...(config.OPENCODE_API_KEY && { apiKey: config.OPENCODE_API_KEY }),
+      })
+      return p(modelName)
+    }
+
+    default:
+      throw new Error(
+        `不支援的 AI provider: ${provider}。支援的 provider: ${SUPPORTED_PROVIDERS.join(', ')}`,
+      )
   }
-  return createCustomProvider(baseUrl, apiKey)
+}
+
+// ────────────────────────────────────────────
+// createEmbeddingModelFromId
+// ────────────────────────────────────────────
+
+/**
+ * 從 `provider/model-name` 格式建立 embedding 模型。
+ *
+ * 使用與聊天模型相同的 provider API 設定，無獨立的 embedding 憑證。
+ */
+export function createEmbeddingModelFromId(modelId: string, config: Config): EmbeddingModel {
+  const { provider, modelName } = parseModelId(modelId)
+
+  switch (provider) {
+    case 'openai': {
+      const p = createOpenAI({
+        ...(config.OPENAI_BASE_URL && { baseURL: config.OPENAI_BASE_URL }),
+        ...(config.OPENAI_API_KEY && { apiKey: config.OPENAI_API_KEY }),
+      })
+      return p.embedding(modelName)
+    }
+
+    case 'google': {
+      const p = createGoogleGenerativeAI({
+        ...(config.GOOGLE_BASE_URL && { baseURL: config.GOOGLE_BASE_URL }),
+        ...(config.GOOGLE_API_KEY && { apiKey: config.GOOGLE_API_KEY }),
+      })
+      return p.embedding(modelName)
+    }
+
+    case 'openrouter': {
+      const p = createOpenAI({
+        baseURL: config.OPENROUTER_BASE_URL ?? PROVIDER_BASE_URLS.openrouter,
+        ...(config.OPENROUTER_API_KEY && { apiKey: config.OPENROUTER_API_KEY }),
+      })
+      return p.embedding(modelName)
+    }
+
+    case 'opencode-zen': {
+      const p = createOpenAI({
+        baseURL: config.OPENCODE_BASE_URL ?? PROVIDER_BASE_URLS['opencode-zen'],
+        ...(config.OPENCODE_API_KEY && { apiKey: config.OPENCODE_API_KEY }),
+      })
+      return p.embedding(modelName)
+    }
+
+    case 'anthropic':
+      throw new Error('Anthropic 不支援 embedding 模型')
+
+    default:
+      throw new Error(
+        `不支援的 embedding provider: ${provider}。支援的 provider: ${SUPPORTED_PROVIDERS.join(', ')}`,
+      )
+  }
 }

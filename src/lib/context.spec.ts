@@ -144,25 +144,6 @@ describe('assembleContext', () => {
     expect(messages[0].content).toContain('</user_profiles>')
   })
 
-  test('Token budget 超支 → 裁剪語義搜尋（sqlite-vec 未初始化，語義搜尋 throw 被 catch 攔截）', async () => {
-    const { sqlite, db } = setupTestDb()
-    const deps = createFakeDeps()
-
-    const soul = 'S' // 極短 SOUL
-    const config = makeConfig({ CONTEXT_MAX_TOKENS: 5, SOUL: soul })
-    const msg = makeMessage({ content: 'Hi' })
-
-    const messages = await assembleContext({
-      recentMessages: [msg],
-      config,
-      db,
-      sqliteDb: sqlite,
-      deps,
-    })
-
-    // system prompt 應不含語義搜尋結果
-    expect(messages[0].content).not.toContain('<related_history>')
-  })
 
   test('訊息順序：舊訊息在前', async () => {
     const { sqlite, db } = setupTestDb()
@@ -184,6 +165,162 @@ describe('assembleContext', () => {
     const userMsgs = messages.filter(m => m.role === 'user')
     expect(userMsgs.length).toBe(1)
     expect(userMsgs[0].content).toBe('u1: first\nu1: second')
+  })
+
+  test('Token budget 裁剪優先序：先移除語義搜尋，保留用戶摘要', async () => {
+    const { sqlite, db } = setupTestDb()
+    // 插入用戶摘要
+    sqlite.exec(`INSERT INTO user_summaries(id, user_id, summary, updated_at) VALUES('us1','user1','Alice 是工程師',${Date.now()})`)
+    // 插入群組摘要
+    sqlite.exec(`INSERT INTO group_summaries(id, summary, updated_at) VALUES('singleton','聊天室主要討論技術',${Date.now()})`)
+
+    // 設定 SOUL 和 CONTEXT_MAX_TOKENS 使得移除語義搜尋後剛好符合預算
+    const soul = 'S'.repeat(50) // 50 chars
+    const config = makeConfig({
+      SOUL: soul,
+      CONTEXT_MAX_TOKENS: 60, // 預算緊張，移除語義搜尋後剛好符合
+      embeddingEnabled: true,
+    })
+
+    // 設定 deps：語義搜尋回傳結果
+    const deps = {
+      ...createFakeDeps(),
+      searchSimilarChunks: (() => [{ chunkId: 'chunk-1', distance: 0.5 }]) as unknown as ContextDeps['searchSimilarChunks'],
+      getChunkContents: (() => ['Some relevant history content here']) as unknown as ContextDeps['getChunkContents'],
+    }
+
+    const msg = makeMessage({ userId: 'user1', content: 'Hi there' })
+
+    const messages = await assembleContext({
+      recentMessages: [msg],
+      config,
+      db,
+      sqliteDb: sqlite,
+      deps,
+    })
+
+    // 驗證：system prompt 含 <user_profiles> 但不含 <related_history>
+    expect(messages[0].content).toContain('<user_profiles>')
+    expect(messages[0].content).toContain('Alice 是工程師')
+    expect(messages[0].content).not.toContain('<related_history>')
+  })
+
+  test('Token budget 全部超支 → 語義搜尋和用戶摘要都被裁剪', async () => {
+    const { sqlite, db } = setupTestDb()
+    // 插入用戶摘要
+    sqlite.exec(`INSERT INTO user_summaries(id, user_id, summary, updated_at) VALUES('us1','user1','Alice 是工程師',${Date.now()})`)
+    // 插入群組摘要
+    sqlite.exec(`INSERT INTO group_summaries(id, summary, updated_at) VALUES('singleton','聊天室主要討論技術',${Date.now()})`)
+
+    // 設定極小的 CONTEXT_MAX_TOKENS 使得兩個都被裁剪
+    const soul = 'S'.repeat(100)
+    const config = makeConfig({
+      SOUL: soul,
+      CONTEXT_MAX_TOKENS: 50, // 非常小，兩個都會被裁剪
+      embeddingEnabled: true,
+    })
+
+    // 設定 deps：語義搜尋回傳結果
+    const deps = {
+      ...createFakeDeps(),
+      searchSimilarChunks: (() => [{ chunkId: 'chunk-1', distance: 0.5 }]) as unknown as ContextDeps['searchSimilarChunks'],
+      getChunkContents: (() => ['Some relevant history content here']) as unknown as ContextDeps['getChunkContents'],
+    }
+
+    const msg = makeMessage({ userId: 'user1', content: 'Hi there' })
+
+    const messages = await assembleContext({
+      recentMessages: [msg],
+      config,
+      db,
+      sqliteDb: sqlite,
+      deps,
+    })
+
+    // 驗證：system prompt 不含 <user_profiles> 和 <related_history>，但含 <soul>
+    expect(messages[0].content).not.toContain('<user_profiles>')
+    expect(messages[0].content).not.toContain('<related_history>')
+    expect(messages[0].content).toContain('<soul>')
+  })
+
+  test('語義搜尋回傳 0 結果 → system prompt 不含 <related_history>', async () => {
+    const { sqlite, db } = setupTestDb()
+    const config = makeConfig({ embeddingEnabled: true })
+
+    // 設定 deps：語義搜尋回傳空陣列
+    const deps = {
+      ...createFakeDeps(),
+      searchSimilarChunks: (() => []) as unknown as ContextDeps['searchSimilarChunks'],
+    }
+
+    const msg = makeMessage({ content: 'Hi' })
+
+    const messages = await assembleContext({
+      recentMessages: [msg],
+      config,
+      db,
+      sqliteDb: sqlite,
+      deps,
+    })
+
+    // 驗證：system prompt 不含 <related_history>
+    expect(messages[0].content).not.toContain('<related_history>')
+  })
+
+  test('語義搜尋 throw → 降級繼續，system prompt 不含 <related_history>', async () => {
+    const { sqlite, db } = setupTestDb()
+    const config = makeConfig({ embeddingEnabled: true })
+
+    // 設定 deps：embedText throw
+    const deps = {
+      ...createFakeDeps(),
+      embedText: (async () => {
+        throw new Error('Embedding service down')
+      }) as unknown as ContextDeps['embedText'],
+    }
+
+    const msg = makeMessage({ content: 'Hi' })
+
+    // 驗證：assembleContext 不 throw，正常返回
+    const messages = await assembleContext({
+      recentMessages: [msg],
+      config,
+      db,
+      sqliteDb: sqlite,
+      deps,
+    })
+
+    expect(messages.length).toBeGreaterThan(0)
+    expect(messages[0].content).not.toContain('<related_history>')
+  })
+
+  test('embeddingEnabled=false → 跳過語義搜尋', async () => {
+    const { sqlite, db } = setupTestDb()
+    const config = makeConfig({ embeddingEnabled: false })
+
+    // 設定 deps：embedText 會被呼叫時 throw（驗證它不被呼叫）
+    let embedTextCalled = false
+    const deps = {
+      ...createFakeDeps(),
+      embedText: (async () => {
+        embedTextCalled = true
+        throw new Error('Should not be called')
+      }) as unknown as ContextDeps['embedText'],
+    }
+
+    const msg = makeMessage({ content: 'Hi' })
+
+    const messages = await assembleContext({
+      recentMessages: [msg],
+      config,
+      db,
+      sqliteDb: sqlite,
+      deps,
+    })
+
+    // 驗證：embedText 未被呼叫，system prompt 不含 <related_history>
+    expect(embedTextCalled).toBe(false)
+    expect(messages[0].content).not.toContain('<related_history>')
   })
 })
 

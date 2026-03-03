@@ -584,3 +584,28 @@ describe('Agent', () => {
     expect(mocks.generateReplyMock.mock.calls.length).toBe(1)
   })
 })
+
+  test('receiveMessage → alias upsert 失敗不阻塞訊息管線', async () => {
+    const { sqlite, db } = setupTestDb()
+    const { services, mocks } = createFakeServices()
+    // 覆寫 services.getOrCreateAlias 使其拋出
+    services.getOrCreateAlias = mock(async () => {
+      throw new Error('Alias upsert failed')
+    }) as unknown as AgentServices['getOrCreateAlias']
+    const agent = new Agent({
+      groupId: 'group1',
+      config: makeConfig(),
+      db,
+      sqliteDb: sqlite,
+      channels: new Map(),
+      services,
+    })
+
+    const msg = makeMessage()
+    // 不應該拋出
+    await agent.receiveMessage(msg)
+    // saveMessage 應該仍然被呼叫
+    expect(mocks.saveMessageMock.mock.calls.length).toBe(1)
+    // recordActivity 應該仍然被呼叫
+    expect(mocks.recordActivityMock.mock.calls.length).toBe(1)
+  })

@@ -1,9 +1,9 @@
-import type { ModelMessage } from 'ai'
+import type { LanguageModel, ModelMessage } from 'ai'
 import type { Config } from '../config/index.ts'
 import { generateText, stepCountIs, tool } from 'ai'
 import { z } from 'zod'
 import { log } from '../logger'
-import { createProvider } from './provider.ts'
+import { createModelFromId, parseModelList } from './provider.ts'
 
 const aiLog = log.withPrefix('[AI]')
 
@@ -31,17 +31,12 @@ export interface GenerateReplyResult {
 
 export interface GeneratorDeps {
   generateText: typeof import('ai').generateText
-  createModel: (config: Config) => ReturnType<typeof createModel>
-}
-
-function createModel(config: Config) {
-  const provider = createProvider(config)
-  return provider.chat(config.AI_MODEL)
+  createModel: (modelId: string, config: Config) => LanguageModel
 }
 
 const defaultDeps: GeneratorDeps = {
   generateText,
-  createModel,
+  createModel: createModelFromId,
 }
 
 /**
@@ -88,66 +83,89 @@ function createAgentTools() {
  *
  * WHY stopWhen: stepCountIs(2)：允許 AI 連續使用 2 個 tool（例如 reaction + reply），
  * 但避免無限迴圈。
+ *
+ * Fallback：CHAT_MODEL 支援逗號分隔的多模型 fallback，依序嘗試直到成功。
  */
 export async function generateReply(
   messages: ModelMessage[],
   config: Config,
   deps: GeneratorDeps = defaultDeps,
 ): Promise<GenerateReplyResult> {
-  aiLog
-    .withMetadata({
-      model: config.AI_MODEL,
-      provider: config.AI_PROVIDER,
-      totalMessages: messages.length,
-    })
-    .info('Sending request to LLM')
+  const models = parseModelList(config.CHAT_MODEL)
 
-  const model = deps.createModel(config)
-  const result = await deps.generateText({
-    model,
-    messages,
-    tools: createAgentTools(),
-    toolChoice: 'required',
-    stopWhen: stepCountIs(2),
-  })
+  let lastError: unknown
 
-  const usage: TokenUsage = {
-    promptTokens: result.usage.inputTokens ?? 0,
-    completionTokens: result.usage.outputTokens ?? 0,
-    totalTokens: result.usage.totalTokens ?? 0,
-  }
+  for (let i = 0; i < models.length; i++) {
+    const { provider, modelName } = models[i]
+    const fullModelId = `${provider}/${modelName}`
 
-  // 從所有 steps 中提取 AI 的決策
-  // WHY 過濾 dynamic：只處理我們定義的 tool，忽略 dynamic tool calls（不應出現但防禦性處理）
-  const actions: AgentAction[] = []
-  for (const step of result.steps) {
-    for (const toolCall of step.toolCalls) {
-      if (toolCall.dynamic)
-        continue
-      switch (toolCall.toolName) {
-        case 'reply':
-          actions.push({ type: 'reply', content: toolCall.input.content })
-          break
-        case 'reaction':
-          actions.push({ type: 'reaction', emoji: toolCall.input.emoji })
-          break
-        case 'skip':
-          actions.push({ type: 'skip', reason: toolCall.input.reason })
-          break
+    try {
+      aiLog
+        .withMetadata({
+          model: fullModelId,
+          totalMessages: messages.length,
+        })
+        .info('Sending request to LLM')
+
+      const model = deps.createModel(fullModelId, config)
+      const result = await deps.generateText({
+        model,
+        messages,
+        tools: createAgentTools(),
+        toolChoice: 'required',
+        stopWhen: stepCountIs(2),
+      })
+
+      const usage: TokenUsage = {
+        promptTokens: result.usage.inputTokens ?? 0,
+        completionTokens: result.usage.outputTokens ?? 0,
+        totalTokens: result.usage.totalTokens ?? 0,
+      }
+
+      // 從所有 steps 中提取 AI 的決策
+      // WHY 過濾 dynamic：只處理我們定義的 tool，忽略 dynamic tool calls（不應出現但防禦性處理）
+      const actions: AgentAction[] = []
+      for (const step of result.steps) {
+        for (const toolCall of step.toolCalls) {
+          if (toolCall.dynamic)
+            continue
+          switch (toolCall.toolName) {
+            case 'reply':
+              actions.push({ type: 'reply', content: toolCall.input.content })
+              break
+            case 'reaction':
+              actions.push({ type: 'reaction', emoji: toolCall.input.emoji })
+              break
+            case 'skip':
+              actions.push({ type: 'skip', reason: toolCall.input.reason })
+              break
+          }
+        }
+      }
+
+      aiLog
+        .withMetadata({
+          model: fullModelId,
+          promptTokens: usage.promptTokens,
+          completionTokens: usage.completionTokens,
+          totalTokens: usage.totalTokens,
+          actionCount: actions.length,
+          actionTypes: actions.map(a => a.type),
+        })
+        .info('LLM response received')
+
+      return { actions, usage }
+    }
+    catch (error) {
+      lastError = error
+      const isLastModel = i === models.length - 1
+      if (!isLastModel) {
+        aiLog
+          .withMetadata({ failedModel: fullModelId, nextModel: `${models[i + 1].provider}/${models[i + 1].modelName}` })
+          .warn('Model failed, trying fallback')
       }
     }
   }
 
-  aiLog
-    .withMetadata({
-      model: config.AI_MODEL,
-      promptTokens: usage.promptTokens,
-      completionTokens: usage.completionTokens,
-      totalTokens: usage.totalTokens,
-      actionCount: actions.length,
-      actionTypes: actions.map(a => a.type),
-    })
-    .info('LLM response received')
-
-  return { actions, usage }
+  throw lastError
 }

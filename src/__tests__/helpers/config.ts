@@ -3,15 +3,23 @@ import type { Config } from '../../config/index.ts'
 /** 建立測試用 Config（全部可選覆寫，預設值合理） */
 export function createTestConfig(overrides: Partial<Config> = {}): Config {
   return {
-    // ── 秘密憑證 ──
+    // ── 平台憑證 ──
     DISCORD_TOKEN: undefined,
     DISCORD_CLIENT_ID: undefined,
     LINE_CHANNEL_SECRET: undefined,
     LINE_CHANNEL_ACCESS_TOKEN: undefined,
-    AI_BASE_URL: undefined,
-    AI_API_KEY: undefined,
-    EMBEDDING_BASE_URL: undefined,
-    EMBEDDING_API_KEY: undefined,
+
+    // ── Per-provider AI 憑證 ──
+    OPENAI_API_KEY: undefined,
+    OPENAI_BASE_URL: undefined,
+    ANTHROPIC_API_KEY: undefined,
+    ANTHROPIC_BASE_URL: undefined,
+    GOOGLE_API_KEY: undefined,
+    GOOGLE_BASE_URL: undefined,
+    OPENROUTER_API_KEY: undefined,
+    OPENROUTER_BASE_URL: undefined,
+    OPENCODE_API_KEY: undefined,
+    OPENCODE_BASE_URL: undefined,
 
     // ── 人格與基本設定 ──
     SOUL: 'test soul',
@@ -20,13 +28,12 @@ export function createTestConfig(overrides: Partial<Config> = {}): Config {
     LINE_WEBHOOK_PORT: 3000,
     HEALTH_PORT: 3000,
 
-    // ── AI 模型 ──
-    AI_PROVIDER: 'openai',
-    AI_MODEL: 'gpt-4o-mini',
-    OBSERVER_MODEL: 'gpt-4o-mini',
+    // ── AI 模型（provider/model 格式） ──
+    CHAT_MODEL: 'openai/gpt-4o-mini',
+    OBSERVER_MODEL: 'openai/gpt-4o-mini',
 
     // ── Embedding ──
-    EMBEDDING_MODEL: 'text-embedding-3-small',
+    EMBEDDING_MODEL: 'openai/text-embedding-3-small',
     EMBEDDING_DIMENSIONS: 1536,
 
     // ── Debounce ──
