@@ -39,6 +39,7 @@ export interface ObserverDeps {
   getFactWatermark: typeof getFactWatermark
   setFactWatermark: typeof setFactWatermark
   processNewFactEmbeddings: typeof processNewFactEmbeddings
+  generateWithFallback: typeof generateWithFallback
   getGroupSummary: typeof getGroupSummary
   upsertGroupSummary: typeof upsertGroupSummary
   getUserSummary: typeof getUserSummary
@@ -58,6 +59,7 @@ const defaultDeps: ObserverDeps = {
   getFactWatermark,
   setFactWatermark,
   processNewFactEmbeddings,
+  generateWithFallback,
   getGroupSummary,
   upsertGroupSummary,
   getUserSummary,
@@ -144,7 +146,7 @@ export async function compressGroupSummary(
   const historyText = formatChatHistory(messages, aliasMap)
   const prompt = buildGroupCompressionPrompt(existingSummary, historyText, pinnedFacts)
 
-  const text = await generateWithFallback(prompt, config)
+  const text = await deps.generateWithFallback(prompt, config)
 
   await deps.upsertGroupSummary(db, text)
   observerLog.withMetadata({ summaryLength: text.length }).info('Group summary compressed')
@@ -180,7 +182,7 @@ export async function compressUserSummaries(
     const messagesText = messages.map(m => m.content).join('\n')
     const prompt = buildUserCompressionPrompt(existingSummary, messagesText, pinnedFacts)
 
-    const text = await generateWithFallback(prompt, config)
+    const text = await deps.generateWithFallback(prompt, config)
 
     await deps.upsertUserSummary(db, userId, text)
     observerLog.withMetadata({ userId, summaryLength: text.length }).debug('User summary compressed')
@@ -248,6 +250,10 @@ async function runFactExtraction(
     observerLog.withError(err instanceof Error ? err : new Error(String(err))).warn('Fact extraction failed, continuing with summary compression')
   }
 
+  // NOTE: 回傳 extraction 前的 snapshot——新萃取的 facts 不在其中。
+  // 目前安全：新 facts 預設 pinned=false，不會影響 collectPinnedFacts。
+  // 若未來允許萃取時設定 pinned=true 或更新既有 pinned fact 的 content，
+  // 需改為在 extraction 後重新讀取。
   return allActiveFacts
 }
 

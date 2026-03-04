@@ -45,8 +45,6 @@ function createFakeDeps(): ContextDeps {
     getChunkContents: (() => []) as unknown as ContextDeps['getChunkContents'],
     getAliasMap: (async () => new Map()) as unknown as ContextDeps['getAliasMap'],
     getAllActiveFacts: (() => []) as unknown as ContextDeps['getAllActiveFacts'],
-    getPinnedFacts: (() => []) as unknown as ContextDeps['getPinnedFacts'],
-    getGroupFacts: (() => []) as unknown as ContextDeps['getGroupFacts'],
     searchSimilarFacts: (() => []) as unknown as ContextDeps['searchSimilarFacts'],
   }
 }
@@ -477,5 +475,48 @@ describe('facts injection', () => {
     // pinned fact 保留、searched fact 被裁剪
     expect(messages[0].content).toContain('pinned fact')
     expect(messages[0].content).not.toContain('searched fact')
+  })
+
+  test('FACT_MAX_PINNED：超過上限的 pinned facts 被截斷', async () => {
+    const { sqlite, db } = setupTestDb()
+
+    // 建立 6 個 group pinned facts，上限設為 2
+    const groupPinned = Array.from({ length: 6 }, (_, i) =>
+      makeFact({ id: i + 1, scope: 'group', content: `group-fact-${i + 1}`, pinned: true }),
+    )
+    // 建立 4 個 user pinned facts（同一 user），上限設為 2
+    const userPinned = Array.from({ length: 4 }, (_, i) =>
+      makeFact({ id: 100 + i, scope: 'user', userId: 'u1', content: `user-fact-${i + 1}`, pinned: true }),
+    )
+
+    const config = makeConfig({
+      FACT_MAX_PINNED: 2,
+      embeddingEnabled: false,
+    })
+
+    const deps: ContextDeps = {
+      ...createFakeDeps(),
+      getAllActiveFacts: (() => [...groupPinned, ...userPinned]) as unknown as ContextDeps['getAllActiveFacts'],
+    }
+
+    const messages = await assembleContext({
+      recentMessages: [makeMessage({ userId: 'u1', content: 'Hi' })],
+      config,
+      db,
+      sqliteDb: sqlite,
+      deps,
+    })
+
+    const systemPrompt = messages[0].content as string
+
+    // group: 只保留前 2 個
+    expect(systemPrompt).toContain('group-fact-1')
+    expect(systemPrompt).toContain('group-fact-2')
+    expect(systemPrompt).not.toContain('group-fact-3')
+
+    // user: 只保留前 2 個
+    expect(systemPrompt).toContain('user-fact-1')
+    expect(systemPrompt).toContain('user-fact-2')
+    expect(systemPrompt).not.toContain('user-fact-3')
   })
 })

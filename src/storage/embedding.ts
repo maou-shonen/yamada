@@ -298,11 +298,12 @@ function findFactsNeedingEmbedding(
  * WHY：避免主流程混入 metadata 寫入細節，並確保更新語意集中。
  */
 function updateFactEmbedWatermark(drizzleDb: DB): void {
+  const now = Date.now()
   drizzleDb.insert(schema.factMetadata)
-    .values({ key: 'fact_embed_watermark', value: Date.now() })
+    .values({ key: 'fact_embed_watermark', value: now })
     .onConflictDoUpdate({
       target: schema.factMetadata.key,
-      set: { value: Date.now() },
+      set: { value: now },
     })
     .run()
 }

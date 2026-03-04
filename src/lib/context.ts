@@ -7,7 +7,7 @@ import type { StoredMessage } from '../types'
 import { log } from '../logger'
 import { getChunkContents } from '../storage/chunks'
 import { embedText, searchSimilarChunks, searchSimilarFacts } from '../storage/embedding'
-import { getAllActiveFacts, getGroupFacts, getPinnedFacts } from '../storage/facts'
+import { getAllActiveFacts } from '../storage/facts'
 import { getGroupSummary, getUserSummariesForGroup } from '../storage/summaries'
 import { getAliasMap } from '../storage/user-aliases'
 import { replaceUserIdsWithAliases } from './alias-replacer'
@@ -22,8 +22,6 @@ export interface ContextDeps {
   getChunkContents: typeof getChunkContents
   getAliasMap: (db: DB, userIds: string[]) => Promise<Map<string, { alias: string, userName: string }>>
   getAllActiveFacts: typeof getAllActiveFacts
-  getPinnedFacts: typeof getPinnedFacts
-  getGroupFacts: typeof getGroupFacts
   searchSimilarFacts: typeof searchSimilarFacts
 }
 
@@ -35,8 +33,6 @@ const defaultDeps: ContextDeps = {
   getChunkContents,
   getAliasMap,
   getAllActiveFacts,
-  getPinnedFacts,
-  getGroupFacts,
   searchSimilarFacts,
 }
 
@@ -213,10 +209,21 @@ export async function assembleContext(params: AssembleContextParams): Promise<Mo
 
   // ── Facts：組裝輸出區塊（facts section assembly）──
   // 分離 pinned 與 searched facts，供 trimming 時優先移除 searched
-  const pinnedFacts = [...factsById.values()].filter(f => f.pinned)
-  const groupFactsPinned = pinnedFacts.filter(f => f.scope === 'group')
+  // FACT_MAX_PINNED 限制每位用戶（及群組）的 pinned facts 上限，避免 system prompt 無限膨脹
+  const allPinnedFacts = [...factsById.values()].filter(f => f.pinned)
+  const groupFactsPinned = allPinnedFacts.filter(f => f.scope === 'group').slice(0, config.FACT_MAX_PINNED)
   const groupFactsSearched = searchedFacts.filter(f => f.scope === 'group')
-  const userFactsPinned = pinnedFacts.filter(f => f.scope === 'user')
+
+  // 用戶 pinned facts 按 user 分組後各自限制上限
+  const allUserPinned = allPinnedFacts.filter(f => f.scope === 'user')
+  const userPinnedByUser = new Map<string, typeof allUserPinned>()
+  for (const f of allUserPinned) {
+    const uid = f.userId ?? ''
+    const arr = userPinnedByUser.get(uid) ?? []
+    arr.push(f)
+    userPinnedByUser.set(uid, arr)
+  }
+  const userFactsPinned = [...userPinnedByUser.values()].flatMap(facts => facts.slice(0, config.FACT_MAX_PINNED))
   const userFactsSearched = searchedFacts.filter(f => f.scope === 'user')
 
   const buildGroupFactsXml = (facts: Fact[]) => {
@@ -345,7 +352,7 @@ export async function assembleContext(params: AssembleContextParams): Promise<Mo
       trimmedGroupFactsPinned,
       hasGroupSummary: !!groupSummary,
       userSummaryCount: userSummaryMap.size,
-      pinnedFactCount: pinnedFacts.length,
+      pinnedFactCount: allPinnedFacts.length,
       searchedFactCount: searchedFacts.length,
       semanticResultCount: semanticSection ? 'included' : 'none',
     })
