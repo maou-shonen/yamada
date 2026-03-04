@@ -172,7 +172,7 @@ CREATE VIRTUAL TABLE fact_vectors USING vec0(
 
 ## Facts 系統（Semantic Collection）
 
-### 設計決策：Hybrid 架構
+### Hybrid 架構
 
 系統採用 Hybrid 記憶架構，兩種記憶類型互補：
 
@@ -181,82 +181,23 @@ CREATE VIRTUAL TABLE fact_vectors USING vec0(
 | `facts`     | 耐久知識（永久保存） | 萃取後 upsert，不被壓縮覆蓋 |
 | `summaries` | 近期印象（定期更新） | Observer 壓縮後整體替換     |
 
-兩者各司其職：facts 記住「Alice 養了一隻貓」這類穩定事實，summaries 記住「Alice 最近心情不好」這類近期狀態。Summary 壓縮時會收到 pinned facts 清單，並被告知不要重複已知事實，避免資訊冗餘。
+Facts 記住「Alice 養了一隻貓」這類穩定事實，summaries 記住「Alice 最近心情不好」這類近期狀態。兩者不互相干擾——facts 不會被 Observer 壓縮覆蓋，summary 壓縮時則會被告知已知事實以避免重複。
 
-### Fact Extraction 流程
+### 萃取機制
 
-Observer 背景任務觸發後，fact extraction 在獨立的 try-catch 中執行，失敗不中斷後續的 summary 壓縮。
+- Observer 背景任務觸發時，先萃取 facts，再壓縮 summaries
+- Fact extraction 使用獨立 watermark，與 summary watermark 分離——萃取失敗不影響摘要壓縮
+- 單次 LLM 呼叫處理所有 user + group facts（非 per-user 拆分）
+- 萃取結果可為 insert（新事實）、update（更新同 key 事實）、supersede（取代矛盾事實）
 
-**完整 Observer 流程：**
+### Context 注入
 
-1. `shouldRun()` 檢查（使用 summary watermark 計算新訊息數）
-2. 取得 fact watermark（`fact_metadata` 中的 `fact_watermark`）
-3. 取得 fact watermark 之後的非 bot 訊息
-4. `getAllActiveFacts()` 取得現有所有 active facts（供 LLM 判斷重複/矛盾）
-5. `extractFacts()` — 單次 LLM 呼叫（`generateObject` + Zod schema，失敗時 fallback 到 `generateWithFallback` + JSON.parse）
-6. 套用萃取結果：`upsertFact()`（新事實或更新同 canonical_key）/ `supersedeFact()`（矛盾替代）
-7. `processNewFactEmbeddings()` — 為新 facts 建立向量索引
-8. `setFactWatermark(Date.now())` — 更新 fact watermark
-9. 取得 pinned facts 供 summary prompt 使用
-10. `compressGroupSummary()` — 傳入 pinned facts，告知 LLM 不要重複
-11. `compressUserSummaries()` — 各用戶各自傳入其 pinned facts
+Facts 依兩種方式注入 AI context：
 
-**Watermark 獨立性：** Fact watermark 儲存在 `fact_metadata` 表，與 summary watermark（`group_summaries.updated_at`）完全獨立。兩者分開是為了避免 fact extraction 與 summary compression 之間的原子性問題——即使 fact extraction 失敗，summary watermark 仍可正常推進。
+- **Pinned facts**：永遠注入，不受 embedding 狀態影響
+- **Semantic search facts**：embedding 啟用時，依語義相關性搜尋相關 facts，與 chunk 搜尋共用同一次 embedding 計算
 
-**canonical_key 格式：** lowercase snake*case，例如 `pet_preference`、`birthday`、`hometown`。萃取時自動正規化（`.toLowerCase().replace(/\s+/g, "*").replace(/[^a-z0-9_]/g, "")`）。
-
-### Context 注入方式
-
-Facts 注入 context 有兩個來源，分別處理：
-
-**Pinned facts（永遠注入）：**
-
-- 不受 embedding 狀態影響，即使 embedding 功能關閉也會注入
-- 透過 `getPinnedFacts(db)` 取得所有 pinned facts
-- 過濾條件：`confidence >= FACT_CONFIDENCE_THRESHOLD`（預設 0.5）
-
-**Semantic search facts（embedding 啟用時）：**
-
-- 用最後一則非 bot 訊息的 embedding 搜尋相關 facts
-- 搜尋參數：`CONTEXT_FACT_TOP_K`（預設 5）、`CONTEXT_FACT_THRESHOLD`（預設 0.7）
-- 過濾條件：`confidence >= FACT_CONFIDENCE_THRESHOLD` 且非 pinned（避免與 pinned 重複）
-- 與 chunk 語義搜尋共用同一次 embedding 計算（`queryEmbedding` 計算一次，兩者共用）
-- 獨立 try-catch：fact 搜尋失敗不影響 chunk 搜尋，反之亦然
-
-**XML 格式：**
-
-```xml
-<group_facts>
-群組事實 1
-群組事實 2
-</group_facts>
-
-<user_facts>
-Alice: 用戶事實 1
-Bob: 用戶事實 2
-</user_facts>
-```
-
-### Context 組裝順序與 Token Trimming
-
-**組裝順序（優先序由高到低）：**
-
-```
-SOUL > group_summary > group_facts > user_profiles > user_facts > related_history
-```
-
-**Token Trimming 順序（最先裁剪 → 最後裁剪）：**
-
-| 順序 | 區塊                   | 說明                                  |
-| ---- | ---------------------- | ------------------------------------- |
-| 1    | `related_history`      | 語義搜尋的歷史 chunk，最先犧牲        |
-| 2    | `user_facts` searched  | 非 pinned 的用戶 facts（保留 pinned） |
-| 3    | `group_facts` searched | 非 pinned 的群組 facts（保留 pinned） |
-| 4    | `user_profiles`        | 用戶摘要                              |
-| 5    | `group_summary`        | 群組摘要                              |
-| 6    | `SOUL`                 | 永不裁剪                              |
-
-Pinned facts 在 trimming 中受到保護：trimming 只移除 searched（non-pinned）部分，pinned facts 保留到最後。
+Token 超出預算時，按優先序裁剪——搜尋到的 facts 先裁、pinned facts 後裁、SOUL 永不裁。
 
 ## DB 檔案結構
 

@@ -58,7 +58,7 @@ export function openGroupDb(dbDir: string, groupId: string): GroupDb {
  * 程式化初始化 schema。
  * 使用 CREATE TABLE IF NOT EXISTS，確保冪等性。
  */
-function initSchema(sqlite: Database): void {
+export function initSchema(sqlite: Database): void {
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS messages (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
