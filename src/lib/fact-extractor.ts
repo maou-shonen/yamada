@@ -1,6 +1,6 @@
 import type { LanguageModel } from 'ai'
 import type { Config } from '../config/index.ts'
-import type { UserMask } from './user-mask.ts'
+import type { UserMask } from './alias-replacer.ts'
 import { generateObject } from 'ai'
 import { z } from 'zod'
 import { buildFactExtractionPrompt } from '../prompts/facts.ts'

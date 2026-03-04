@@ -3,7 +3,7 @@ import type { FactExtractorDeps } from './fact-extractor'
 import { describe, expect, test } from 'bun:test'
 import { createTestConfig } from '../__tests__/helpers/config.ts'
 import { extractFacts } from './fact-extractor'
-import { createUserMask } from './user-mask'
+import { createUserMask } from './alias-replacer'
 
 function makeConfig(overrides: Partial<Config> = {}): Config {
   return createTestConfig({

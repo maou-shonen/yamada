@@ -24,7 +24,7 @@ import {
 import { getAliasMap } from '../storage/user-aliases'
 import { extractFacts } from './fact-extractor.ts'
 import { generateWithFallback } from './llm-utils.ts'
-import { createUserMask } from './user-mask.ts'
+import { createUserMask } from './alias-replacer.ts'
 
 const observerLog = log.withPrefix('[Observer]')
 
