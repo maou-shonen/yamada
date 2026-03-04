@@ -198,6 +198,8 @@ export async function assembleContext(params: AssembleContextParams): Promise<Mo
   let trimmedGroupFactsSearched = false
   let trimmedUserSummaries = false
   let trimmedGroupSummary = false
+  let trimmedUserFactsPinned = false
+  let trimmedGroupFactsPinned = false
 
   if (estimateTokens(allParts()) > maxTokens && semanticSection) {
     semanticSection = ''
@@ -219,6 +221,23 @@ export async function assembleContext(params: AssembleContextParams): Promise<Mo
     groupSummarySection = ''
     trimmedGroupSummary = true
   }
+  // Pinned facts 通常很小，但極端情況下仍可能超出預算——逐筆移除
+  if (estimateTokens(allParts()) > maxTokens && userFactsPinned.length > 0) {
+    for (let i = userFactsPinned.length - 1; i >= 0; i--) {
+      userFactsSection = i > 0 ? buildUserFactsXml(userFactsPinned.slice(0, i)) : ''
+      trimmedUserFactsPinned = true
+      if (estimateTokens(allParts()) <= maxTokens)
+        break
+    }
+  }
+  if (estimateTokens(allParts()) > maxTokens && groupFactsPinned.length > 0) {
+    for (let i = groupFactsPinned.length - 1; i >= 0; i--) {
+      groupFactsSection = i > 0 ? buildGroupFactsXml(groupFactsPinned.slice(0, i)) : ''
+      trimmedGroupFactsPinned = true
+      if (estimateTokens(allParts()) <= maxTokens)
+        break
+    }
+  }
 
   // Context 順序：SOUL > group_summary > group_facts > user_profiles > user_facts > related_history
   const systemPrompt = [soulSection, groupSummarySection, groupFactsSection, userSummarySection, userFactsSection, semanticSection].filter(Boolean).join('\n\n')
@@ -232,6 +251,8 @@ export async function assembleContext(params: AssembleContextParams): Promise<Mo
       trimmedGroupFactsSearched,
       trimmedUserSummaries,
       trimmedGroupSummary,
+      trimmedUserFactsPinned,
+      trimmedGroupFactsPinned,
       hasGroupSummary: !!groupSummary,
       userSummaryCount: userSummaryMap.size,
       pinnedFactCount: pinnedFacts.length,

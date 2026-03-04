@@ -219,8 +219,12 @@ export async function runObserver(
   // 在取訊息前先記錄時間戳，避免 extraction 執行期間新訊息被 watermark 跳過
   const factExtractionStartTime = Date.now()
   const messagesSinceFactWatermark = deps.getMessagesSince(db, new Date(factWatermark))
-  const nonBotMessages = messagesSinceFactWatermark.filter(m => !m.isBot)
-  const existingFacts = deps.getAllActiveFacts(db)
+  // 首次執行（factWatermark=0）會載入全部歷史，限制筆數避免 prompt 過大
+  const nonBotMessages = messagesSinceFactWatermark
+    .filter(m => !m.isBot)
+    .slice(-200)
+  const allActiveFacts = deps.getAllActiveFacts(db)
+  const existingFacts = allActiveFacts
     .filter((fact): fact is typeof fact & { scope: 'user' | 'group' } => fact.scope === 'user' || fact.scope === 'group')
 
   try {
@@ -249,14 +253,17 @@ export async function runObserver(
       })
     }
 
-    await deps.processNewFactEmbeddings(sqliteDb, db, config)
+    // 先推進 watermark 再處理 embedding——embedding 失敗不應阻擋 watermark 前進，
+    // 否則相同訊息會被重複萃取，導致 evidence_count 膨脹
     deps.setFactWatermark(db, factExtractionStartTime)
+    await deps.processNewFactEmbeddings(sqliteDb, db, config)
   }
   catch (err) {
     observerLog.withError(err instanceof Error ? err : new Error(String(err))).warn('Fact extraction failed, continuing with summary compression')
   }
 
-  const allPinnedFacts = deps.getPinnedFacts(db)
+  // 一次取得所有 pinned facts 並在記憶體中分組，避免 per-user N+1 查詢
+  const allPinnedFacts = allActiveFacts.filter(f => f.pinned)
   const groupPinnedText = allPinnedFacts
     .filter(f => f.scope === 'group')
     .map(f => f.content)
@@ -264,7 +271,7 @@ export async function runObserver(
 
   const userPinnedTextMap = new Map<string, string>()
   for (const userId of userIds) {
-    const userPinned = deps.getPinnedFacts(db, userId).filter(f => f.scope === 'user')
+    const userPinned = allPinnedFacts.filter(f => f.scope === 'user' && f.userId === userId)
     if (userPinned.length > 0) {
       userPinnedTextMap.set(userId, userPinned.map(f => f.content).join('\n'))
     }

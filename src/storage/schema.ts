@@ -152,6 +152,8 @@ export const facts = sqliteTable(
   },
   table => ({
     scopeUserStatusIdx: index('facts_scope_user_status_idx').on(table.scope, table.userId, table.status),
+    // NOTE: 此定義供 Drizzle ORM 型別推導用。實際的唯一索引由 initSchema() 中的 raw SQL 建立，
+    // 使用 COALESCE(user_id, '') 處理 NULL 語義，並加上 WHERE status = 'active' 條件（partial index）。
     canonicalKeyUnique: uniqueIndex('facts_canonical_key_unique').on(table.canonicalKey, table.scope, table.userId),
   }),
 )

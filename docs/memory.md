@@ -130,9 +130,9 @@ CREATE TABLE facts (
   status TEXT NOT NULL DEFAULT 'active',
   pinned INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL,
-  UNIQUE(canonical_key, scope, user_id)
+  updated_at INTEGER NOT NULL
 );
+CREATE UNIQUE INDEX facts_canonical_key_unique ON facts(canonical_key, scope, COALESCE(user_id, '')) WHERE status = 'active';
 CREATE INDEX facts_scope_user_status_idx ON facts(scope, user_id, status);
 ```
 
@@ -143,7 +143,7 @@ CREATE INDEX facts_scope_user_status_idx ON facts(scope, user_id, status);
 - `evidence_count`：同一事實被多次觀察到的次數，每次 upsert 遞增
 - `status`：`'active'`（有效）/ `'superseded'`（被新事實取代）/ `'contradicted'`（矛盾）
 - `pinned`：永遠注入 context，不受 embedding 搜尋結果影響
-- UNIQUE 約束：`(canonical_key, scope, user_id)` 確保同一事實不重複建立
+- UNIQUE 約束：`(canonical_key, scope, COALESCE(user_id, ''))` partial index（僅 `status='active'` 的行參與），確保同一事實不重複建立，且 superseded 行不阻擋新 active 行插入
 
 ### fact_metadata
 

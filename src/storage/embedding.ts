@@ -4,7 +4,7 @@ import type { Config } from '../config'
 import type { StoredMessage } from '../types'
 import type { DB } from './db'
 import { embed, embedMany } from 'ai'
-import { asc, gte, inArray } from 'drizzle-orm'
+import { asc, eq, gte, inArray } from 'drizzle-orm'
 import * as sqliteVec from 'sqlite-vec'
 import { createEmbeddingModelFromId } from '../lib/provider.ts'
 import { log } from '../logger'
@@ -274,26 +274,52 @@ export async function processNewFactEmbeddings(
     return
   }
 
-  // 過濾掉已有向量的 facts
-  const factsWithoutVectors = allFacts.filter((fact) => {
-    const exists = db.prepare('SELECT 1 FROM fact_vectors WHERE rowid = ?').get(fact.id)
-    return !exists
+  // 取得上次 embedding 處理的時間戳，用於偵測內容變更
+  const lastEmbedTime = drizzleDb
+    .select()
+    .from(schema.factMetadata)
+    .where(eq(schema.factMetadata.key, 'fact_embed_watermark'))
+    .get()
+    ?.value ?? 0
+
+  // 需要 embedding 的 facts：
+  // 1. 尚無向量的新 facts
+  // 2. 上次 embedding 後被更新的 facts（content 可能已變更，向量需刷新）
+  const factsNeedingEmbedding = allFacts.filter((fact) => {
+    const hasVector = db.prepare('SELECT 1 FROM fact_vectors WHERE rowid = ?').get(fact.id)
+    if (!hasVector)
+      return true
+    if (fact.updatedAt > lastEmbedTime) {
+      // 刪除舊向量，稍後重新 embed
+      db.prepare('DELETE FROM fact_vectors WHERE rowid = ?').run(fact.id)
+      return true
+    }
+    return false
   })
 
-  if (factsWithoutVectors.length === 0) {
-    embeddingLog.debug('All facts already have vectors')
+  if (factsNeedingEmbedding.length === 0) {
+    embeddingLog.debug('All facts already have up-to-date vectors')
     return
   }
 
-  // 批次 embed 所有未建立向量的 facts
-  const texts = factsWithoutVectors.map(f => f.content)
+  // 批次 embed 所有需要建立/刷新向量的 facts
+  const texts = factsNeedingEmbedding.map(f => f.content)
   const embeddings = await embedTexts(texts, config, deps)
 
-  for (let i = 0; i < factsWithoutVectors.length; i++) {
-    insertFactVector(db, factsWithoutVectors[i].id, embeddings[i])
+  for (let i = 0; i < factsNeedingEmbedding.length; i++) {
+    insertFactVector(db, factsNeedingEmbedding[i].id, embeddings[i])
   }
 
+  // 記錄本次 embedding 時間，供下次偵測變更用
+  drizzleDb.insert(schema.factMetadata)
+    .values({ key: 'fact_embed_watermark', value: Date.now() })
+    .onConflictDoUpdate({
+      target: schema.factMetadata.key,
+      set: { value: Date.now() },
+    })
+    .run()
+
   embeddingLog
-    .withMetadata({ insertedFactVectors: factsWithoutVectors.length })
+    .withMetadata({ insertedFactVectors: factsNeedingEmbedding.length })
     .info('Fact embeddings stored')
 }

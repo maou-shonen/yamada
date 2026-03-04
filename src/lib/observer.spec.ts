@@ -176,16 +176,8 @@ describe('compressGroupSummary', () => {
     insertMessage(sqlite, { content: 'Hello world' })
     const { deps } = createFakeDeps()
 
-    // Note: generateWithFallback is now called internally with default deps
-    // This test will fail due to missing API key, which is expected
-    // The actual LLM call is tested in llm-utils.spec.ts
-    try {
-      await compressGroupSummary(db, 0, config, deps)
-    }
-    catch (error) {
-      // Expected: API key missing error from LLM call
-      expect(error).toBeDefined()
-    }
+    // generateWithFallback 內部呼叫 LLM，因無 API key 而拋錯——驗證函式正確傳播錯誤
+    await expect(compressGroupSummary(db, 0, config, deps)).rejects.toThrow()
   })
 
   test('增量壓縮：compressGroupSummary 只收到 watermark 之後的訊息', async () => {
@@ -206,15 +198,7 @@ describe('compressGroupSummary', () => {
 
     const { deps } = createFakeDeps()
 
-    // Note: generateWithFallback is now called internally with default deps
-    // This test will fail due to missing API key, which is expected
-    try {
-      await compressGroupSummary(db, watermarkTs, config, deps)
-    }
-    catch (error) {
-      // Expected: API key missing error from LLM call
-      expect(error).toBeDefined()
-    }
+    await expect(compressGroupSummary(db, watermarkTs, config, deps)).rejects.toThrow()
   })
 })
 
@@ -226,15 +210,7 @@ describe('compressUserSummaries', () => {
     insertMessage(sqlite, { userId: 'u2', content: 'msg from u2' })
     const { deps } = createFakeDeps()
 
-    // Note: generateWithFallback is now called internally with default deps
-    // This test will fail due to missing API key, which is expected
-    try {
-      await compressUserSummaries(db, 0, ['u1', 'u2'], config, deps)
-    }
-    catch (error) {
-      // Expected: API key missing error from LLM call
-      expect(error).toBeDefined()
-    }
+    await expect(compressUserSummaries(db, 0, ['u1', 'u2'], config, deps)).rejects.toThrow()
   })
 })
 
@@ -260,15 +236,8 @@ describe('runObserver', () => {
     insertMessage(sqlite, { userId: 'u1', content: 'hello' })
     insertMessage(sqlite, { userId: 'u2', content: 'world' })
 
-    // Note: generateWithFallback is now called internally with default deps
-    // This test will fail due to missing API key, which is expected
-    try {
-      await runObserver(db, sqlite, config, deps)
-    }
-    catch (error) {
-      // Expected: API key missing error from LLM call
-      expect(error).toBeDefined()
-    }
+    // runObserver 內部呼叫 LLM，因無 API key 而拋錯
+    await expect(runObserver(db, sqlite, config, deps)).rejects.toThrow()
   })
 
   test('Bot 訊息不被列入 user summaries', async () => {
@@ -278,15 +247,7 @@ describe('runObserver', () => {
     insertMessage(sqlite, { userId: 'u1', isBot: false, content: 'user msg' })
     insertMessage(sqlite, { userId: 'bot', isBot: true, content: 'bot msg' })
 
-    // Note: generateWithFallback is now called internally with default deps
-    // This test will fail due to missing API key, which is expected
-    try {
-      await runObserver(db, sqlite, config, deps)
-    }
-    catch (error) {
-      // Expected: API key missing error from LLM call
-      expect(error).toBeDefined()
-    }
+    await expect(runObserver(db, sqlite, config, deps)).rejects.toThrow()
   })
 
   test('只有 bot 訊息達 threshold → userIds 為空 → 跳過 user summaries', async () => {
@@ -297,15 +258,7 @@ describe('runObserver', () => {
     insertMessage(sqlite, { userId: 'bot', isBot: true, content: 'bot msg 1' })
     insertMessage(sqlite, { userId: 'bot', isBot: true, content: 'bot msg 2' })
 
-    // Note: generateWithFallback is now called internally with default deps
-    // This test will fail due to missing API key, which is expected
-    try {
-      await runObserver(db, sqlite, config, deps)
-    }
-    catch (error) {
-      // Expected: API key missing error from LLM call
-      expect(error).toBeDefined()
-    }
+    await expect(runObserver(db, sqlite, config, deps)).rejects.toThrow()
   })
 })
 

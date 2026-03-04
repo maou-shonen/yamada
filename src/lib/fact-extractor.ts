@@ -126,19 +126,32 @@ export async function extractFacts(
     parsedResults = factExtractionArraySchema.parse(parsedJson)
   }
 
+  const existingFactIds = new Set(existingFacts.map(f => f.id))
+
   const normalized = parsedResults
     .map((item) => {
       const confidence = item.confidence
       if (confidence < 0 || confidence > 1)
         return null
 
+      const canonicalKey = normalizeCanonicalKey(item.canonicalKey)
+      // 正規化後可能變為空字串（例如全符號的 key），過濾掉
+      if (!canonicalKey)
+        return null
+
       const nextItem: FactExtractionResult = {
         ...item,
-        canonicalKey: normalizeCanonicalKey(item.canonicalKey),
+        canonicalKey,
       }
 
       if (nextItem.scope === 'group')
         delete nextItem.userId
+
+      // supersede 的 targetFactId 必須是既有 active fact，否則丟棄
+      if (nextItem.action === 'supersede' && nextItem.targetFactId !== undefined) {
+        if (!existingFactIds.has(nextItem.targetFactId))
+          return null
+      }
 
       return nextItem
     })

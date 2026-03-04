@@ -159,7 +159,7 @@ export function initSchema(sqlite: Database): void {
       updated_at INTEGER NOT NULL
     )
   `)
-  sqlite.exec(`CREATE UNIQUE INDEX IF NOT EXISTS facts_canonical_key_unique ON facts(canonical_key, scope, COALESCE(user_id, ''))`)
+  sqlite.exec(`CREATE UNIQUE INDEX IF NOT EXISTS facts_canonical_key_unique ON facts(canonical_key, scope, COALESCE(user_id, '')) WHERE status = 'active'`)
   sqlite.exec(`CREATE INDEX IF NOT EXISTS facts_scope_user_status_idx ON facts(scope, user_id, status)`)
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS fact_metadata (
