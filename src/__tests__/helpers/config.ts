@@ -58,6 +58,10 @@ export function createTestConfig(overrides: Partial<Config> = {}): Config {
     CONTEXT_RECENT_MESSAGE_COUNT: 20,
     CONTEXT_TOKEN_ESTIMATE_RATIO: 3,
     CHUNK_TOKEN_LIMIT: 500,
+    CONTEXT_FACT_TOP_K: 5,
+    CONTEXT_FACT_THRESHOLD: 0.7,
+    FACT_CONFIDENCE_THRESHOLD: 0.5,
+    FACT_MAX_PINNED: 4,
 
     // ── Observer ──
     OBSERVER_MESSAGE_THRESHOLD: 50,

@@ -98,6 +98,14 @@ const configSchema = z.object({
   CONTEXT_TOKEN_ESTIMATE_RATIO: z.coerce.number().positive().default(3),
   /** Chunk 分割的 token 上限（每個 chunk 的最大 token 數） */
   CHUNK_TOKEN_LIMIT: z.coerce.number().int().positive().default(500),
+  /** 語義搜尋回傳的最大 facts 筆數 */
+  CONTEXT_FACT_TOP_K: z.coerce.number().int().positive().default(5),
+  /** 語義搜尋距離閾值（0~2 為 cosine distance 合理範圍） */
+  CONTEXT_FACT_THRESHOLD: z.coerce.number().min(0).max(2).default(0.7),
+  /** 注入 context 的最低 confidence */
+  FACT_CONFIDENCE_THRESHOLD: z.coerce.number().min(0).max(1).default(0.5),
+  /** 每位用戶 pinned facts 上限 */
+  FACT_MAX_PINNED: z.coerce.number().int().positive().default(4),
 
   // ── Observer — 背景記憶壓縮 ──
 
