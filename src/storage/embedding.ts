@@ -10,6 +10,7 @@ import { createEmbeddingModelFromId } from '../lib/provider.ts'
 import { log } from '../logger'
 import { buildChunks } from './chunking'
 import { getMaxChunkEndTimestamp, saveChunk } from './chunks'
+import { getAllActiveFacts } from './facts'
 import * as schema from './schema'
 
 const embeddingLog = log.withPrefix('[Embedding]')
@@ -188,4 +189,111 @@ export async function processNewChunks(
   embeddingLog
     .withMetadata({ insertedChunks: chunks.length })
     .info('Chunk embeddings stored')
+}
+
+/**
+ * 初始化 fact 向量表。
+ * 與 chunk_vectors 共存於同一個 SQLite DB，使用 fact 的 integer PK 作為 rowid。
+ */
+export function initFactVectorTable(db: Database, dimensions: number): void {
+  sqliteVec.load(db)
+
+  db.exec(`
+    CREATE VIRTUAL TABLE IF NOT EXISTS fact_vectors USING vec0(
+      embedding float[${dimensions}]
+    )
+  `)
+}
+
+/**
+ * 插入 fact 向量到 sqlite-vec。
+ * factId 就是 fact 的 INTEGER PRIMARY KEY，直接用作 sqlite-vec 的 rowid。
+ * 先查詢是否已存在，再插入以確保冪等性。
+ * 注意：sqlite-vec 虛擬表不支援 INSERT OR IGNORE，必須手動檢查重複。
+ */
+export function insertFactVector(
+  db: Database,
+  factId: number,
+  embedding: number[],
+): void {
+  const exists = db.prepare('SELECT 1 FROM fact_vectors WHERE rowid = ?').get(factId)
+  if (!exists) {
+    db.prepare(
+      'INSERT INTO fact_vectors(rowid, embedding) VALUES (?, ?)',
+    ).run(factId, toVector(embedding))
+  }
+}
+
+/**
+ * 語義搜尋：直接回傳 rowid（即 fact id）。
+ * sqlite-vec 回傳的 rowid 就是 fact 的 INTEGER PRIMARY KEY，無需額外映射。
+ */
+export function searchSimilarFacts(
+  db: Database,
+  queryEmbedding: number[],
+  topK: number,
+  threshold: number,
+): { factId: number, distance: number }[] {
+  const vecStmt = db.prepare(`
+    SELECT rowid, distance
+    FROM fact_vectors
+    WHERE embedding MATCH ? AND k = ?
+    ORDER BY distance
+  `)
+
+  const vecRows = vecStmt.all(toVector(queryEmbedding), topK) as Array<{
+    rowid: number
+    distance: number
+  }>
+
+  const filtered = vecRows.filter(row => row.distance <= threshold)
+  if (filtered.length === 0)
+    return []
+
+  return filtered.map(row => ({
+    factId: row.rowid,
+    distance: row.distance,
+  }))
+}
+
+/**
+ * 批次處理尚未建立向量的 fact。
+ * 取得所有 active facts，過濾掉已有向量的，批次 embed 後插入。
+ */
+export async function processNewFactEmbeddings(
+  db: Database,
+  drizzleDb: DB,
+  config: Config,
+  deps: EmbeddingDeps = defaultDeps,
+): Promise<void> {
+  initFactVectorTable(db, config.EMBEDDING_DIMENSIONS)
+
+  const allFacts = getAllActiveFacts(drizzleDb)
+  if (allFacts.length === 0) {
+    embeddingLog.debug('No facts to process for embedding')
+    return
+  }
+
+  // 過濾掉已有向量的 facts
+  const factsWithoutVectors = allFacts.filter((fact) => {
+    const exists = db.prepare('SELECT 1 FROM fact_vectors WHERE rowid = ?').get(fact.id)
+    return !exists
+  })
+
+  if (factsWithoutVectors.length === 0) {
+    embeddingLog.debug('All facts already have vectors')
+    return
+  }
+
+  // 批次 embed 所有未建立向量的 facts
+  const texts = factsWithoutVectors.map(f => f.content)
+  const embeddings = await embedTexts(texts, config, deps)
+
+  for (let i = 0; i < factsWithoutVectors.length; i++) {
+    insertFactVector(db, factsWithoutVectors[i].id, embeddings[i])
+  }
+
+  embeddingLog
+    .withMetadata({ insertedFactVectors: factsWithoutVectors.length })
+    .info('Fact embeddings stored')
 }
