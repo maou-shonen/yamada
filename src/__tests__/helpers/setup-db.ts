@@ -78,6 +78,29 @@ export function setupTables(sqlite: Database): void {
     )
   `)
   sqlite.exec(`CREATE UNIQUE INDEX IF NOT EXISTS user_aliases_alias_unique ON user_aliases(alias)`)
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS facts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      scope TEXT NOT NULL,
+      user_id TEXT,
+      canonical_key TEXT NOT NULL,
+      content TEXT NOT NULL,
+      confidence REAL NOT NULL DEFAULT 1.0,
+      evidence_count INTEGER NOT NULL DEFAULT 1,
+      status TEXT NOT NULL DEFAULT 'active',
+      pinned INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )
+  `)
+  sqlite.exec(`CREATE UNIQUE INDEX IF NOT EXISTS facts_canonical_key_unique ON facts(canonical_key, scope, COALESCE(user_id, ''))`)
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS facts_scope_user_status_idx ON facts(scope, user_id, status)`)
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS fact_metadata (
+      key TEXT PRIMARY KEY,
+      value INTEGER NOT NULL
+    )
+  `)
 }
 
 /**

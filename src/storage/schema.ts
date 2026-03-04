@@ -127,3 +127,40 @@ export const userAliases = sqliteTable(
     aliasUnique: uniqueIndex('user_aliases_alias_unique').on(table.alias),
   }),
 )
+
+/**
+ * Facts 表 - 儲存從對話中萃取的結構化知識
+ * scope: 'user'（個人事實）或 'group'（群組事實）
+ * userId: 個人事實的擁有者，群組事實為 null
+ * canonicalKey: 正規化鍵（用於判斷重複/更新）
+ * status: 'active' | 'superseded' | 'contradicted'
+ */
+export const facts = sqliteTable(
+  'facts',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    scope: text('scope').notNull(),
+    userId: text('user_id'),
+    canonicalKey: text('canonical_key').notNull(),
+    content: text('content').notNull(),
+    confidence: real('confidence').notNull().default(1.0),
+    evidenceCount: integer('evidence_count').notNull().default(1),
+    status: text('status').notNull().default('active'),
+    pinned: integer('pinned', { mode: 'boolean' }).notNull().default(false),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  table => ({
+    scopeUserStatusIdx: index('facts_scope_user_status_idx').on(table.scope, table.userId, table.status),
+    canonicalKeyUnique: uniqueIndex('facts_canonical_key_unique').on(table.canonicalKey, table.scope, table.userId),
+  }),
+)
+
+/**
+ * Fact Metadata 表 - 儲存 fact 相關的元資料（如 watermark）
+ * Singleton key-value store
+ */
+export const factMetadata = sqliteTable('fact_metadata', {
+  key: text('key').primaryKey(),
+  value: integer('value').notNull(),
+})
