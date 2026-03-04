@@ -5,6 +5,7 @@ import { describe, expect, mock, test } from 'bun:test'
 import { createTestConfig } from '../__tests__/helpers/config.ts'
 import { setupTestDb } from '../__tests__/helpers/setup-db'
 import { getDistinctUserIds, getMessagesByUser, getMessagesSince } from '../storage/messages'
+import { buildGroupCompressionPrompt } from '../prompts/observer'
 import { processNewFactEmbeddings } from '../storage/embedding'
 import {
   getAllActiveFacts,
@@ -306,5 +307,92 @@ describe('runObserver', () => {
       expect(error).toBeDefined()
     }
   })
+})
 
+describe('fact extraction integration', () => {
+  test('runObserver: extractFacts 成功 → upsertFact 和 setFactWatermark 被呼叫', async () => {
+    const { sqlite, db } = setupTestDb()
+    const config = makeConfig(2) // threshold = 2
+    insertMessage(sqlite, { userId: 'u1', content: 'hello', isBot: false })
+    insertMessage(sqlite, { userId: 'u2', content: 'world', isBot: false })
+
+    let upsertFactCalled = false
+    let setFactWatermarkCalled = false
+
+    const { deps } = createFakeDeps()
+    const testDeps: ObserverDeps = {
+      ...deps,
+      extractFacts: (async () => [{
+        action: 'insert' as const,
+        scope: 'group' as const,
+        canonicalKey: 'test_fact',
+        content: 'test',
+        confidence: 0.9,
+      }]) as unknown as ObserverDeps['extractFacts'],
+      upsertFact: (...args) => {
+        upsertFactCalled = true
+        return upsertFact(...args)
+      },
+      setFactWatermark: (...args) => {
+        setFactWatermarkCalled = true
+        return setFactWatermark(...args)
+      },
+      processNewFactEmbeddings: (async () => {}) as unknown as ObserverDeps['processNewFactEmbeddings'],
+    }
+
+    try {
+      await runObserver(db, sqlite, config, testDeps)
+    }
+    catch {
+      // Expected: compressGroupSummary → generateWithFallback throws (no API key)
+    }
+
+    expect(upsertFactCalled).toBe(true)
+    expect(setFactWatermarkCalled).toBe(true)
+  })
+
+  test('runObserver: extractFacts 拋錯不中斷摘要壓縮', async () => {
+    const { sqlite, db } = setupTestDb()
+    const config = makeConfig(2)
+    insertMessage(sqlite, { userId: 'u1', content: 'hello', isBot: false })
+    insertMessage(sqlite, { userId: 'u2', content: 'world', isBot: false })
+
+    let setFactWatermarkCalled = false
+    let getGroupSummaryCalled = false
+
+    const { deps } = createFakeDeps()
+    const testDeps: ObserverDeps = {
+      ...deps,
+      extractFacts: (async () => { throw new Error('Fact extraction error') }) as unknown as ObserverDeps['extractFacts'],
+      setFactWatermark: (...args) => {
+        setFactWatermarkCalled = true
+        return setFactWatermark(...args)
+      },
+      processNewFactEmbeddings: (async () => {}) as unknown as ObserverDeps['processNewFactEmbeddings'],
+      getGroupSummary: (...args) => {
+        getGroupSummaryCalled = true
+        return getGroupSummary(...args)
+      },
+    }
+
+    try {
+      await runObserver(db, sqlite, config, testDeps)
+    }
+    catch {
+      // Expected: compressGroupSummary → generateWithFallback throws (no API key)
+    }
+
+    // extractFacts 拋錯 → try block 中的 setFactWatermark 不被呼叫
+    expect(setFactWatermarkCalled).toBe(false)
+    // compressGroupSummary 仍被執行（getGroupSummary 是 compressGroupSummary 內部呼叫）
+    expect(getGroupSummaryCalled).toBe(true)
+  })
+
+  test('compressGroupSummary 傳入 pinnedFacts → prompt 包含「不要重複」', () => {
+    // buildGroupCompressionPrompt 是 compressGroupSummary 內部使用的 prompt builder
+    // 直接驗證 prompt builder 輸出，確保 pinnedFacts 被正確注入
+    const prompt = buildGroupCompressionPrompt(null, 'some chat history', 'Alice 養了一隻貓')
+    expect(prompt).toContain('不要重複')
+    expect(prompt).toContain('Alice 養了一隻貓')
+  })
 })
