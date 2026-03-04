@@ -5,12 +5,22 @@ import { describe, expect, mock, test } from 'bun:test'
 import { createTestConfig } from '../__tests__/helpers/config.ts'
 import { setupTestDb } from '../__tests__/helpers/setup-db'
 import { getDistinctUserIds, getMessagesByUser, getMessagesSince } from '../storage/messages'
+import { processNewFactEmbeddings } from '../storage/embedding'
+import {
+  getAllActiveFacts,
+  getFactWatermark,
+  getPinnedFacts,
+  setFactWatermark,
+  supersedeFact,
+  upsertFact,
+} from '../storage/facts'
 import {
   getGroupSummary,
   getUserSummary,
   upsertGroupSummary,
   upsertUserSummary,
 } from '../storage/summaries'
+import { extractFacts } from './fact-extractor.ts'
 import {
   compressGroupSummary,
   compressUserSummaries,
@@ -61,6 +71,14 @@ function createFakeDeps() {
     getMessagesSince,
     getMessagesByUser,
     getDistinctUserIds,
+    extractFacts,
+    upsertFact,
+    supersedeFact,
+    getAllActiveFacts,
+    getPinnedFacts,
+    getFactWatermark,
+    setFactWatermark,
+    processNewFactEmbeddings,
     getGroupSummary,
     upsertGroupSummary,
     getUserSummary,
@@ -228,7 +246,7 @@ describe('runObserver', () => {
     insertMessage(sqlite, { content: 'm1' })
     insertMessage(sqlite, { content: 'm2' })
 
-    await runObserver(db, config, deps)
+    await runObserver(db, sqlite, config, deps)
 
     // When shouldRun is false, observer should skip without calling AI
     // No error should be thrown
@@ -244,7 +262,7 @@ describe('runObserver', () => {
     // Note: generateWithFallback is now called internally with default deps
     // This test will fail due to missing API key, which is expected
     try {
-      await runObserver(db, config, deps)
+      await runObserver(db, sqlite, config, deps)
     }
     catch (error) {
       // Expected: API key missing error from LLM call
@@ -262,7 +280,7 @@ describe('runObserver', () => {
     // Note: generateWithFallback is now called internally with default deps
     // This test will fail due to missing API key, which is expected
     try {
-      await runObserver(db, config, deps)
+      await runObserver(db, sqlite, config, deps)
     }
     catch (error) {
       // Expected: API key missing error from LLM call
@@ -281,7 +299,7 @@ describe('runObserver', () => {
     // Note: generateWithFallback is now called internally with default deps
     // This test will fail due to missing API key, which is expected
     try {
-      await runObserver(db, config, deps)
+      await runObserver(db, sqlite, config, deps)
     }
     catch (error) {
       // Expected: API key missing error from LLM call

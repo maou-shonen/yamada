@@ -1,8 +1,18 @@
+import type { Database } from 'bun:sqlite'
 import type { Config } from '../config/index.ts'
 import type { DB } from '../storage/db'
 import { count, gt } from 'drizzle-orm'
 import { log } from '../logger'
 import { buildGroupCompressionPrompt, buildUserCompressionPrompt, formatChatHistory } from '../prompts/observer'
+import { processNewFactEmbeddings } from '../storage/embedding'
+import {
+  getAllActiveFacts,
+  getFactWatermark,
+  getPinnedFacts,
+  setFactWatermark,
+  supersedeFact,
+  upsertFact,
+} from '../storage/facts'
 import { getDistinctUserIds, getMessagesByUser, getMessagesSince } from '../storage/messages'
 import * as schema from '../storage/schema'
 import {
@@ -11,6 +21,7 @@ import {
   upsertGroupSummary,
   upsertUserSummary,
 } from '../storage/summaries'
+import { extractFacts } from './fact-extractor.ts'
 import { getAliasMap } from '../storage/user-aliases'
 import { generateWithFallback } from './llm-utils.ts'
 
@@ -20,6 +31,14 @@ export interface ObserverDeps {
   getMessagesSince: typeof getMessagesSince
   getMessagesByUser: typeof getMessagesByUser
   getDistinctUserIds: typeof getDistinctUserIds
+  extractFacts: typeof extractFacts
+  upsertFact: typeof upsertFact
+  supersedeFact: typeof supersedeFact
+  getAllActiveFacts: typeof getAllActiveFacts
+  getPinnedFacts: typeof getPinnedFacts
+  getFactWatermark: typeof getFactWatermark
+  setFactWatermark: typeof setFactWatermark
+  processNewFactEmbeddings: typeof processNewFactEmbeddings
   getGroupSummary: typeof getGroupSummary
   upsertGroupSummary: typeof upsertGroupSummary
   getUserSummary: typeof getUserSummary
@@ -31,6 +50,14 @@ const defaultDeps: ObserverDeps = {
   getMessagesSince,
   getMessagesByUser,
   getDistinctUserIds,
+  extractFacts,
+  upsertFact,
+  supersedeFact,
+  getAllActiveFacts,
+  getPinnedFacts,
+  getFactWatermark,
+  setFactWatermark,
+  processNewFactEmbeddings,
   getGroupSummary,
   upsertGroupSummary,
   getUserSummary,
@@ -100,6 +127,7 @@ export async function compressGroupSummary(
   watermark: number,
   config: Config,
   deps: ObserverDeps = defaultDeps,
+  pinnedFacts?: string,
 ): Promise<void> {
   observerLog.info('Compressing group summary')
 
@@ -114,7 +142,7 @@ export async function compressGroupSummary(
   const aliasMap = new Map([...fullAliasMap.entries()].map(([uid, v]) => [uid, v.alias]))
 
   const historyText = formatChatHistory(messages, aliasMap)
-  const prompt = buildGroupCompressionPrompt(existingSummary, historyText)
+  const prompt = buildGroupCompressionPrompt(existingSummary, historyText, pinnedFacts)
 
   const text = await generateWithFallback(prompt, config)
 
@@ -140,15 +168,17 @@ export async function compressUserSummaries(
   userIds: string[],
   config: Config,
   deps: ObserverDeps = defaultDeps,
+  pinnedFactsMap?: Map<string, string>,
 ): Promise<void> {
   observerLog.withMetadata({ userCount: userIds.length }).info('Compressing user summaries')
 
   for (const userId of userIds) {
     const messages = deps.getMessagesByUser(db, userId, config.OBSERVER_USER_MESSAGE_LIMIT)
     const existingSummary = await deps.getUserSummary(db, userId)
+    const pinnedFacts = pinnedFactsMap?.get(userId)
 
     const messagesText = messages.map(m => m.content).join('\n')
-    const prompt = buildUserCompressionPrompt(existingSummary, messagesText)
+    const prompt = buildUserCompressionPrompt(existingSummary, messagesText, pinnedFacts)
 
     const text = await generateWithFallback(prompt, config)
 
@@ -169,6 +199,7 @@ export async function compressUserSummaries(
  */
 export async function runObserver(
   db: DB,
+  sqliteDb: Database,
   config: Config,
   deps: ObserverDeps = defaultDeps,
 ): Promise<void> {
@@ -182,11 +213,64 @@ export async function runObserver(
   // 在頂層擷取 watermark 並傳遞給兩個 compress 函式，
   // 避免 compressGroupSummary 更新 updated_at 後影響 compressUserSummaries 讀到的 watermark
   const watermark = getWatermark(db)
+  const factWatermark = deps.getFactWatermark(db)
   const userIds = deps.getDistinctUserIds(db, watermark)
 
-  await compressGroupSummary(db, watermark, config, deps)
+  const messagesSinceFactWatermark = deps.getMessagesSince(db, new Date(factWatermark))
+  const nonBotMessages = messagesSinceFactWatermark.filter(m => !m.isBot)
+  const existingFacts = deps.getAllActiveFacts(db)
+    .filter((fact): fact is typeof fact & { scope: 'user' | 'group' } => fact.scope === 'user' || fact.scope === 'group')
+
+  try {
+    const factUserIds = [...new Set(nonBotMessages.map(m => m.userId))]
+    const aliasMap = await deps.getAliasMap(db, factUserIds)
+    const factMessages = nonBotMessages.map(m => ({
+      userId: m.userId,
+      userName: aliasMap.get(m.userId)?.alias ?? aliasMap.get(m.userId)?.userName ?? m.userId,
+      content: m.content,
+      createdAt: m.timestamp,
+    }))
+
+    const results = await deps.extractFacts(factMessages, existingFacts, config)
+
+    for (const result of results) {
+      if (result.action === 'supersede' && result.targetFactId !== undefined) {
+        deps.supersedeFact(db, result.targetFactId)
+      }
+
+      deps.upsertFact(db, {
+        scope: result.scope,
+        userId: result.userId ?? null,
+        canonicalKey: result.canonicalKey,
+        content: result.content,
+        confidence: result.confidence,
+      })
+    }
+
+    await deps.processNewFactEmbeddings(sqliteDb, db, config)
+    deps.setFactWatermark(db, Date.now())
+  }
+  catch (err) {
+    observerLog.withError(err instanceof Error ? err : new Error(String(err))).warn('Fact extraction failed, continuing with summary compression')
+  }
+
+  const allPinnedFacts = deps.getPinnedFacts(db)
+  const groupPinnedText = allPinnedFacts
+    .filter(f => f.scope === 'group')
+    .map(f => f.content)
+    .join('\n') || undefined
+
+  const userPinnedTextMap = new Map<string, string>()
+  for (const userId of userIds) {
+    const userPinned = deps.getPinnedFacts(db, userId).filter(f => f.scope === 'user')
+    if (userPinned.length > 0) {
+      userPinnedTextMap.set(userId, userPinned.map(f => f.content).join('\n'))
+    }
+  }
+
+  await compressGroupSummary(db, watermark, config, deps, groupPinnedText)
 
   if (userIds.length > 0) {
-    await compressUserSummaries(db, watermark, userIds, config, deps)
+    await compressUserSummaries(db, watermark, userIds, config, deps, userPinnedTextMap)
   }
 }
