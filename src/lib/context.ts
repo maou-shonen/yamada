@@ -7,7 +7,7 @@ import type { StoredMessage } from '../types'
 import { log } from '../logger'
 import { getChunkContents } from '../storage/chunks'
 import { embedText, searchSimilarChunks, searchSimilarFacts } from '../storage/embedding'
-import { getPinnedFacts, getGroupFacts } from '../storage/facts'
+import { getGroupFacts, getPinnedFacts } from '../storage/facts'
 import { getGroupSummary, getUserSummariesForGroup } from '../storage/summaries'
 import { getAliasMap } from '../storage/user-aliases'
 import { replaceUserIdsWithAliases } from './alias-replacer'
@@ -172,12 +172,14 @@ export async function assembleContext(params: AssembleContextParams): Promise<Mo
   const userFactsSearched = searchedFacts.filter(f => f.scope === 'user')
 
   const buildGroupFactsXml = (facts: Fact[]) => {
-    if (facts.length === 0) return ''
+    if (facts.length === 0)
+      return ''
     return `<group_facts>\n${facts.map(f => f.content).join('\n')}\n</group_facts>`
   }
 
   const buildUserFactsXml = (facts: Fact[]) => {
-    if (facts.length === 0) return ''
+    if (facts.length === 0)
+      return ''
     const lines = facts.map((f) => {
       const alias = aliasMap.get(f.userId ?? '')?.alias ?? f.userId ?? ''
       return `${alias}: ${f.content}`

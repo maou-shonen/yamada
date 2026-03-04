@@ -6,14 +6,14 @@ import { buildFactExtractionPrompt } from '../prompts/facts.ts'
 import { generateWithFallback } from './llm-utils.ts'
 import { createModelFromId, parseModelList } from './provider.ts'
 
-type FactMessage = {
+interface FactMessage {
   userId: string
   userName: string
   content: string
   createdAt: number
 }
 
-type ExistingFactInput = {
+interface ExistingFactInput {
   id: number
   scope: 'user' | 'group'
   userId: string | null
@@ -22,7 +22,7 @@ type ExistingFactInput = {
   confidence: number
 }
 
-export type FactExtractionResult = {
+export interface FactExtractionResult {
   action: 'insert' | 'update' | 'supersede'
   scope: 'user' | 'group'
   userId?: string

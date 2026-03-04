@@ -21,8 +21,8 @@ import {
   upsertGroupSummary,
   upsertUserSummary,
 } from '../storage/summaries'
-import { extractFacts } from './fact-extractor.ts'
 import { getAliasMap } from '../storage/user-aliases'
+import { extractFacts } from './fact-extractor.ts'
 import { generateWithFallback } from './llm-utils.ts'
 
 const observerLog = log.withPrefix('[Observer]')

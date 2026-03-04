@@ -1,11 +1,11 @@
-type FactMessage = {
+interface FactMessage {
   userId: string
   userName: string
   content: string
   createdAt: number
 }
 
-type ExistingFact = {
+interface ExistingFact {
   id: number
   scope: 'user' | 'group'
   userId: string | null
