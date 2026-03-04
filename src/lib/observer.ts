@@ -216,6 +216,8 @@ export async function runObserver(
   const factWatermark = deps.getFactWatermark(db)
   const userIds = deps.getDistinctUserIds(db, watermark)
 
+  // 在取訊息前先記錄時間戳，避免 extraction 執行期間新訊息被 watermark 跳過
+  const factExtractionStartTime = Date.now()
   const messagesSinceFactWatermark = deps.getMessagesSince(db, new Date(factWatermark))
   const nonBotMessages = messagesSinceFactWatermark.filter(m => !m.isBot)
   const existingFacts = deps.getAllActiveFacts(db)
@@ -248,7 +250,7 @@ export async function runObserver(
     }
 
     await deps.processNewFactEmbeddings(sqliteDb, db, config)
-    deps.setFactWatermark(db, Date.now())
+    deps.setFactWatermark(db, factExtractionStartTime)
   }
   catch (err) {
     observerLog.withError(err instanceof Error ? err : new Error(String(err))).warn('Fact extraction failed, continuing with summary compression')

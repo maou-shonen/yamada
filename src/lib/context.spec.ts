@@ -44,6 +44,7 @@ function createFakeDeps(): ContextDeps {
     searchSimilarChunks: (() => []) as unknown as ContextDeps['searchSimilarChunks'],
     getChunkContents: (() => []) as unknown as ContextDeps['getChunkContents'],
     getAliasMap: (async () => new Map()) as unknown as ContextDeps['getAliasMap'],
+    getAllActiveFacts: (() => []) as unknown as ContextDeps['getAllActiveFacts'],
     getPinnedFacts: (() => []) as unknown as ContextDeps['getPinnedFacts'],
     getGroupFacts: (() => []) as unknown as ContextDeps['getGroupFacts'],
     searchSimilarFacts: (() => []) as unknown as ContextDeps['searchSimilarFacts'],
@@ -397,7 +398,7 @@ describe('facts injection', () => {
 
     const deps: ContextDeps = {
       ...createFakeDeps(),
-      getGroupFacts: (() => [pinnedFact]) as unknown as ContextDeps['getGroupFacts'],
+      getAllActiveFacts: (() => [pinnedFact]) as unknown as ContextDeps['getAllActiveFacts'],
     }
 
     const messages = await assembleContext({
@@ -421,7 +422,7 @@ describe('facts injection', () => {
     let searchSimilarFactsCalled = false
     const deps: ContextDeps = {
       ...createFakeDeps(),
-      getGroupFacts: (() => [pinnedFact]) as unknown as ContextDeps['getGroupFacts'],
+      getAllActiveFacts: (() => [pinnedFact]) as unknown as ContextDeps['getAllActiveFacts'],
       searchSimilarFacts: ((..._args: unknown[]) => {
         searchSimilarFactsCalled = true
         return []
@@ -461,7 +462,7 @@ describe('facts injection', () => {
 
     const deps: ContextDeps = {
       ...createFakeDeps(),
-      getGroupFacts: (() => [pinnedFact, searchableFact]) as unknown as ContextDeps['getGroupFacts'],
+      getAllActiveFacts: (() => [pinnedFact, searchableFact]) as unknown as ContextDeps['getAllActiveFacts'],
       searchSimilarFacts: (() => [{ factId: 2, distance: 0.5 }]) as unknown as ContextDeps['searchSimilarFacts'],
     }
 

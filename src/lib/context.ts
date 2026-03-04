@@ -7,7 +7,7 @@ import type { StoredMessage } from '../types'
 import { log } from '../logger'
 import { getChunkContents } from '../storage/chunks'
 import { embedText, searchSimilarChunks, searchSimilarFacts } from '../storage/embedding'
-import { getGroupFacts, getPinnedFacts } from '../storage/facts'
+import { getAllActiveFacts, getGroupFacts, getPinnedFacts } from '../storage/facts'
 import { getGroupSummary, getUserSummariesForGroup } from '../storage/summaries'
 import { getAliasMap } from '../storage/user-aliases'
 import { replaceUserIdsWithAliases } from './alias-replacer'
@@ -21,6 +21,7 @@ export interface ContextDeps {
   searchSimilarChunks: typeof searchSimilarChunks
   getChunkContents: typeof getChunkContents
   getAliasMap: (db: DB, userIds: string[]) => Promise<Map<string, { alias: string, userName: string }>>
+  getAllActiveFacts: typeof getAllActiveFacts
   getPinnedFacts: typeof getPinnedFacts
   getGroupFacts: typeof getGroupFacts
   searchSimilarFacts: typeof searchSimilarFacts
@@ -33,6 +34,7 @@ const defaultDeps: ContextDeps = {
   searchSimilarChunks,
   getChunkContents,
   getAliasMap,
+  getAllActiveFacts,
   getPinnedFacts,
   getGroupFacts,
   searchSimilarFacts,
@@ -93,16 +95,10 @@ export async function assembleContext(params: AssembleContextParams): Promise<Mo
   }
 
   // ── Facts 收集 ──
-  // 取得所有 active group facts（含 pinned + non-pinned）建立查找池
-  const allGroupFacts = deps.getGroupFacts(db)
-  const factsById = new Map(allGroupFacts.map(f => [f.id, f]))
-
-  // 取得每個活躍用戶的 pinned facts（group pinned 已在 allGroupFacts 中，Map 自動去重）
-  for (const userId of nonBotUserIds) {
-    for (const f of deps.getPinnedFacts(db, userId)) {
-      factsById.set(f.id, f)
-    }
-  }
+  // 取得所有 active facts（含 user + group，pinned + non-pinned）建立完整查找池
+  // 必須包含所有 active facts，否則語義搜尋回傳的 non-pinned user facts 會找不到對應資料
+  const allActiveFacts = deps.getAllActiveFacts(db)
+  const factsById = new Map(allActiveFacts.map(f => [f.id, f]))
 
   // ── 語義搜尋：chunk + facts ──
   // 共用同一次 embedding 計算，chunk 與 fact 搜尋各自容錯

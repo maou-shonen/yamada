@@ -1,5 +1,5 @@
 import type { DB } from './db'
-import { and, eq, isNull } from 'drizzle-orm'
+import { and, eq, isNull, ne } from 'drizzle-orm'
 import * as schema from './schema'
 
 /** 建立或更新 fact 的輸入型別 */
@@ -85,7 +85,8 @@ export function getPinnedFacts(db: DB, userId?: string): Fact[] {
 export function upsertFact(db: DB, fact: FactUpsert): void {
   const userId = fact.userId ?? null
 
-  // 查找既有 fact：需處理 user_id 為 null 的情況
+  // 查找既有 active fact：需處理 user_id 為 null 的情況
+  // 只匹配 active 狀態，避免意外復活已 superseded/contradicted 的 fact
   const existing = db
     .select()
     .from(schema.facts)
@@ -96,6 +97,8 @@ export function upsertFact(db: DB, fact: FactUpsert): void {
         userId === null
           ? isNull(schema.facts.userId)
           : eq(schema.facts.userId, userId),
+        ne(schema.facts.status, 'superseded'),
+        ne(schema.facts.status, 'contradicted'),
       ),
     )
     .get()
