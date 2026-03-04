@@ -1,7 +1,5 @@
-import type { LanguageModel } from 'ai'
 import type { Config } from '../config/index.ts'
 import type { DB } from '../storage/db'
-import { generateText } from 'ai'
 import { count, gt } from 'drizzle-orm'
 import { log } from '../logger'
 import { buildGroupCompressionPrompt, buildUserCompressionPrompt, formatChatHistory } from '../prompts/observer'
@@ -14,13 +12,11 @@ import {
   upsertUserSummary,
 } from '../storage/summaries'
 import { getAliasMap } from '../storage/user-aliases'
-import { createModelFromId, parseModelList } from './provider.ts'
+import { generateWithFallback } from './llm-utils.ts'
 
 const observerLog = log.withPrefix('[Observer]')
 
 export interface ObserverDeps {
-  generateText: typeof import('ai').generateText
-  createModel: (modelId: string, config: Config) => LanguageModel
   getMessagesSince: typeof getMessagesSince
   getMessagesByUser: typeof getMessagesByUser
   getDistinctUserIds: typeof getDistinctUserIds
@@ -32,8 +28,6 @@ export interface ObserverDeps {
 }
 
 const defaultDeps: ObserverDeps = {
-  generateText,
-  createModel: createModelFromId,
   getMessagesSince,
   getMessagesByUser,
   getDistinctUserIds,
@@ -91,43 +85,6 @@ export function shouldRun(db: DB, config: Config): boolean {
 }
 
 /**
- * 使用 OBSERVER_MODEL 的 fallback 列表呼叫 LLM。
- * 依序嘗試每個模型，失敗時自動切換到下一個。
- */
-async function generateWithFallback(
-  prompt: string,
-  config: Config,
-  deps: ObserverDeps,
-): Promise<string> {
-  const models = parseModelList(config.OBSERVER_MODEL)
-  let lastError: unknown
-
-  for (let i = 0; i < models.length; i++) {
-    const { provider, modelName } = models[i]
-    const fullModelId = `${provider}/${modelName}`
-
-    try {
-      const result = await deps.generateText({
-        model: deps.createModel(fullModelId, config),
-        messages: [{ role: 'user', content: prompt }],
-      })
-      return result.text
-    }
-    catch (error) {
-      lastError = error
-      const isLastModel = i === models.length - 1
-      if (!isLastModel) {
-        observerLog
-          .withMetadata({ failedModel: fullModelId, nextModel: `${models[i + 1].provider}/${models[i + 1].modelName}` })
-          .warn('Observer model failed, trying fallback')
-      }
-    }
-  }
-
-  throw lastError
-}
-
-/**
  * 壓縮群組摘要。
  *
  * 基於「舊摘要 + watermark 之後的新訊息」增量壓縮。
@@ -159,7 +116,7 @@ export async function compressGroupSummary(
   const historyText = formatChatHistory(messages, aliasMap)
   const prompt = buildGroupCompressionPrompt(existingSummary, historyText)
 
-  const text = await generateWithFallback(prompt, config, deps)
+  const text = await generateWithFallback(prompt, config)
 
   await deps.upsertGroupSummary(db, text)
   observerLog.withMetadata({ summaryLength: text.length }).info('Group summary compressed')
@@ -193,7 +150,7 @@ export async function compressUserSummaries(
     const messagesText = messages.map(m => m.content).join('\n')
     const prompt = buildUserCompressionPrompt(existingSummary, messagesText)
 
-    const text = await generateWithFallback(prompt, config, deps)
+    const text = await generateWithFallback(prompt, config)
 
     await deps.upsertUserSummary(db, userId, text)
     observerLog.withMetadata({ userId, summaryLength: text.length }).debug('User summary compressed')

@@ -1,5 +1,5 @@
 import type { DB } from './db'
-import { and, eq, isNull, or } from 'drizzle-orm'
+import { and, eq, isNull } from 'drizzle-orm'
 import * as schema from './schema'
 
 /** 建立或更新 fact 的輸入型別 */
@@ -58,7 +58,8 @@ export function getPinnedFacts(db: DB, userId?: string): Fact[] {
     )
     .all()
 
-  if (!userId) return groupPinned
+  if (!userId)
+    return groupPinned
 
   const userPinned = db
     .select()
@@ -157,7 +158,8 @@ export function getFactWatermark(db: DB): number {
     .select()
     .from(schema.factMetadata)
     .where(eq(schema.factMetadata.key, 'fact_watermark'))
-    .get()?.value ?? 0
+    .get()
+    ?.value ?? 0
 }
 
 /** 設定 fact extraction watermark 時間戳 */
