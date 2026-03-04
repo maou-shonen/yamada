@@ -2,10 +2,12 @@ import type { ModelMessage } from 'ai'
 import type { Database } from 'bun:sqlite'
 import type { Config } from '../config/index.ts'
 import type { DB } from '../storage/db'
+import type { Fact } from '../storage/facts'
 import type { StoredMessage } from '../types'
 import { log } from '../logger'
 import { getChunkContents } from '../storage/chunks'
-import { embedText, searchSimilarChunks } from '../storage/embedding'
+import { embedText, searchSimilarChunks, searchSimilarFacts } from '../storage/embedding'
+import { getPinnedFacts, getGroupFacts } from '../storage/facts'
 import { getGroupSummary, getUserSummariesForGroup } from '../storage/summaries'
 import { getAliasMap } from '../storage/user-aliases'
 import { replaceUserIdsWithAliases } from './alias-replacer'
@@ -19,6 +21,9 @@ export interface ContextDeps {
   searchSimilarChunks: typeof searchSimilarChunks
   getChunkContents: typeof getChunkContents
   getAliasMap: (db: DB, userIds: string[]) => Promise<Map<string, { alias: string, userName: string }>>
+  getPinnedFacts: typeof getPinnedFacts
+  getGroupFacts: typeof getGroupFacts
+  searchSimilarFacts: typeof searchSimilarFacts
 }
 
 const defaultDeps: ContextDeps = {
@@ -28,6 +33,9 @@ const defaultDeps: ContextDeps = {
   searchSimilarChunks,
   getChunkContents,
   getAliasMap,
+  getPinnedFacts,
+  getGroupFacts,
+  searchSimilarFacts,
 }
 
 export interface AssembleContextParams {
@@ -42,7 +50,7 @@ export interface AssembleContextParams {
  * 組裝 AI 對話 context。
  *
  * System prompt 各區塊以 XML 標籤分隔，避免 LLM 混淆區塊邊界。
- * 優先序：SOUL > 群組摘要 > 用戶資料 > 相關歷史。
+ * 優先序：SOUL > 群組摘要 > 群組 facts > 用戶資料 > 用戶 facts > 相關歷史。
  * 近期訊息轉為 user/assistant 交替的 chat messages——
  * 連續的非 bot 訊息合併為單一 user message，維持正確的對話輪次結構。
  */
@@ -84,17 +92,34 @@ export async function assembleContext(params: AssembleContextParams): Promise<Mo
     contextLog.withMetadata({ userCount: userSummaryMap.size }).debug('User summaries loaded')
   }
 
-  // 語義搜尋：僅在 embedding 啟用時執行，取最後一則非 bot 訊息作為查詢向量
+  // ── Facts 收集 ──
+  // 取得所有 active group facts（含 pinned + non-pinned）建立查找池
+  const allGroupFacts = deps.getGroupFacts(db)
+  const factsById = new Map(allGroupFacts.map(f => [f.id, f]))
+
+  // 取得每個活躍用戶的 pinned facts（group pinned 已在 allGroupFacts 中，Map 自動去重）
+  for (const userId of nonBotUserIds) {
+    for (const f of deps.getPinnedFacts(db, userId)) {
+      factsById.set(f.id, f)
+    }
+  }
+
+  // ── 語義搜尋：chunk + facts ──
+  // 共用同一次 embedding 計算，chunk 與 fact 搜尋各自容錯
   let semanticSection = ''
+  let queryEmbedding: number[] | null = null
+
   if (config.embeddingEnabled) {
     const lastNonBot = [...recentMessages].reverse().find(m => !m.isBot)
     if (lastNonBot) {
       try {
         contextLog.withMetadata({ query: lastNonBot.content.slice(0, 60) }).debug('Running semantic search')
-        const embedding = await deps.embedText(lastNonBot.content, config)
+        queryEmbedding = await deps.embedText(lastNonBot.content, config)
+
+        // Chunk 語義搜尋
         const similar = deps.searchSimilarChunks(
           sqliteDb,
-          embedding,
+          queryEmbedding,
           config.CONTEXT_SEMANTIC_TOP_K,
           config.CONTEXT_SEMANTIC_THRESHOLD,
         )
@@ -109,40 +134,110 @@ export async function assembleContext(params: AssembleContextParams): Promise<Mo
         }
       }
       catch (err) {
-        // 語義搜尋失敗不中斷流程，降級繼續
+        // embedding 或 chunk 搜尋失敗不中斷流程，降級繼續
         contextLog.withError(err instanceof Error ? err : new Error(String(err))).warn('Semantic search failed, skipping')
       }
     }
   }
 
+  // Fact 語義搜尋（獨立容錯，embedding 失敗時自然跳過）
+  const searchedFacts: Fact[] = []
+  if (queryEmbedding) {
+    try {
+      const factResults = deps.searchSimilarFacts(
+        sqliteDb,
+        queryEmbedding,
+        config.CONTEXT_FACT_TOP_K,
+        config.CONTEXT_FACT_THRESHOLD,
+      )
+      for (const { factId } of factResults) {
+        const fact = factsById.get(factId)
+        if (fact && fact.confidence >= config.FACT_CONFIDENCE_THRESHOLD && !fact.pinned) {
+          searchedFacts.push(fact)
+        }
+      }
+      contextLog.withMetadata({ searchedFactCount: searchedFacts.length }).debug('Fact semantic search results')
+    }
+    catch (err) {
+      contextLog.withError(err instanceof Error ? err : new Error(String(err))).warn('Fact semantic search failed, skipping')
+    }
+  }
+
+  // ── Facts 區塊組裝 ──
+  // 分離 pinned 與 searched facts，供 trimming 時優先移除 searched
+  const pinnedFacts = [...factsById.values()].filter(f => f.pinned)
+  const groupFactsPinned = pinnedFacts.filter(f => f.scope === 'group')
+  const groupFactsSearched = searchedFacts.filter(f => f.scope === 'group')
+  const userFactsPinned = pinnedFacts.filter(f => f.scope === 'user')
+  const userFactsSearched = searchedFacts.filter(f => f.scope === 'user')
+
+  const buildGroupFactsXml = (facts: Fact[]) => {
+    if (facts.length === 0) return ''
+    return `<group_facts>\n${facts.map(f => f.content).join('\n')}\n</group_facts>`
+  }
+
+  const buildUserFactsXml = (facts: Fact[]) => {
+    if (facts.length === 0) return ''
+    const lines = facts.map((f) => {
+      const alias = aliasMap.get(f.userId ?? '')?.alias ?? f.userId ?? ''
+      return `${alias}: ${f.content}`
+    })
+    return `<user_facts>\n${lines.join('\n')}\n</user_facts>`
+  }
+
+  let groupFactsSection = buildGroupFactsXml([...groupFactsPinned, ...groupFactsSearched])
+  let userFactsSection = buildUserFactsXml([...userFactsPinned, ...userFactsSearched])
+
   // ── Token 預算裁剪 ──
-  // 裁剪順序：semantic → userSummary。
-  // 語義搜尋是「錦上添花」的歷史回顧，user summary 對人格一致性更關鍵，
-  // 而 SOUL 和 group summary 是不可裁剪的核心。
+  // 裁剪順序（最先移除 → 最後移除）：
+  // related_history → user_facts searched → group_facts searched → user_profiles → group_summary
+  // SOUL 永不裁剪。Facts 中先移除 searched（non-pinned），盡量保留 pinned。
   const maxTokens = config.CONTEXT_MAX_TOKENS
+  const allParts = () => [soulSection, groupSummarySection, groupFactsSection, userSummarySection, userFactsSection, semanticSection]
   const estimateTokens = (parts: string[]) => Math.ceil(parts.filter(Boolean).join('').length / ratio)
   let trimmedSemantic = false
+  let trimmedUserFactsSearched = false
+  let trimmedGroupFactsSearched = false
   let trimmedUserSummaries = false
+  let trimmedGroupSummary = false
 
-  if (estimateTokens([soulSection, groupSummarySection, userSummarySection, semanticSection]) > maxTokens && semanticSection) {
+  if (estimateTokens(allParts()) > maxTokens && semanticSection) {
     semanticSection = ''
     trimmedSemantic = true
   }
-  if (estimateTokens([soulSection, groupSummarySection, userSummarySection, semanticSection]) > maxTokens && userSummarySection) {
+  if (estimateTokens(allParts()) > maxTokens && userFactsSearched.length > 0) {
+    userFactsSection = buildUserFactsXml(userFactsPinned)
+    trimmedUserFactsSearched = true
+  }
+  if (estimateTokens(allParts()) > maxTokens && groupFactsSearched.length > 0) {
+    groupFactsSection = buildGroupFactsXml(groupFactsPinned)
+    trimmedGroupFactsSearched = true
+  }
+  if (estimateTokens(allParts()) > maxTokens && userSummarySection) {
     userSummarySection = ''
     trimmedUserSummaries = true
   }
+  if (estimateTokens(allParts()) > maxTokens && groupSummarySection) {
+    groupSummarySection = ''
+    trimmedGroupSummary = true
+  }
 
-  const systemPrompt = [soulSection, groupSummarySection, userSummarySection, semanticSection].filter(Boolean).join('\n\n')
+  // Context 順序：SOUL > group_summary > group_facts > user_profiles > user_facts > related_history
+  const systemPrompt = [soulSection, groupSummarySection, groupFactsSection, userSummarySection, userFactsSection, semanticSection].filter(Boolean).join('\n\n')
 
   contextLog
     .withMetadata({
       estimatedTotalTokens: Math.ceil(systemPrompt.length / ratio),
       maxTokens,
       trimmedSemantic,
+      trimmedUserFactsSearched,
+      trimmedGroupFactsSearched,
       trimmedUserSummaries,
+      trimmedGroupSummary,
       hasGroupSummary: !!groupSummary,
       userSummaryCount: userSummaryMap.size,
+      pinnedFactCount: pinnedFacts.length,
+      searchedFactCount: searchedFacts.length,
       semanticResultCount: semanticSection ? 'included' : 'none',
     })
     .info('Context assembly complete')

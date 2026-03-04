@@ -44,6 +44,9 @@ function createFakeDeps(): ContextDeps {
     searchSimilarChunks: (() => []) as unknown as ContextDeps['searchSimilarChunks'],
     getChunkContents: (() => []) as unknown as ContextDeps['getChunkContents'],
     getAliasMap: (async () => new Map()) as unknown as ContextDeps['getAliasMap'],
+    getPinnedFacts: (() => []) as unknown as ContextDeps['getPinnedFacts'],
+    getGroupFacts: (() => []) as unknown as ContextDeps['getGroupFacts'],
+    searchSimilarFacts: (() => []) as unknown as ContextDeps['searchSimilarFacts'],
   }
 }
 
