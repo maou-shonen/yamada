@@ -260,6 +260,8 @@ export function searchSimilarFacts(
  * 找出需要建立或刷新的 fact 向量。
  *
  * WHY：把「新向量 + stale 向量」判斷集中，讓主流程只保留高層步驟。
+ * 不在此處刪除舊向量——由呼叫方在 embedding 成功後才刪除，
+ * 避免 embedding 失敗時 fact 暫時失去向量。
  */
 function findFactsNeedingEmbedding(
   db: Database,
@@ -274,22 +276,26 @@ function findFactsNeedingEmbedding(
     .get()
     ?.value ?? 0
 
-  // 需要 embedding 的 facts：
-  // 1. 尚無向量的新 facts
-  // 2. 上次 embedding 後被更新的 facts（content 可能已變更，向量需刷新）
-  return allFacts.filter((fact) => {
-    const hasVector = db.prepare('SELECT 1 FROM fact_vectors WHERE rowid = ?').get(fact.id)
-    if (!hasVector)
-      return true
+  const factsToEmbed: typeof allFacts = []
+  const staleFactIds: number[] = []
 
-    if (fact.updatedAt > lastEmbedTime) {
-      // 刪除舊向量，稍後重新 embed
-      db.prepare('DELETE FROM fact_vectors WHERE rowid = ?').run(fact.id)
-      return true
+  for (const fact of allFacts) {
+    const hasVector = db.prepare('SELECT 1 FROM fact_vectors WHERE rowid = ?').get(fact.id)
+
+    // 尚無向量的新 facts
+    if (!hasVector) {
+      factsToEmbed.push(fact)
+      continue
     }
 
-    return false
-  })
+    // 上次 embedding 後被更新的 facts（content 可能已變更，向量需刷新）
+    if (fact.updatedAt > lastEmbedTime) {
+      factsToEmbed.push(fact)
+      staleFactIds.push(fact.id)
+    }
+  }
+
+  return { factsToEmbed, staleFactIds }
 }
 
 /**
@@ -327,25 +333,31 @@ export async function processNewFactEmbeddings(
     embeddingLog.debug('No facts to process for embedding')
     return
   }
-  const factsNeedingEmbedding = findFactsNeedingEmbedding(db, drizzleDb, allFacts)
+  const { factsToEmbed, staleFactIds } = findFactsNeedingEmbedding(db, drizzleDb, allFacts)
 
-  if (factsNeedingEmbedding.length === 0) {
+  if (factsToEmbed.length === 0) {
     embeddingLog.debug('All facts already have up-to-date vectors')
     return
   }
 
   // ── 3) 批次 embedding 並寫入向量 ──
-  const texts = factsNeedingEmbedding.map(f => f.content)
+  // 先取得新向量，成功後才刪除舊向量並寫入新向量——
+  // 避免 embedding 失敗時 fact 暫時失去向量
+  const texts = factsToEmbed.map(f => f.content)
   const embeddings = await embedTexts(texts, config, deps)
 
-  for (let i = 0; i < factsNeedingEmbedding.length; i++) {
-    insertFactVector(db, factsNeedingEmbedding[i].id, embeddings[i])
+  for (const staleId of staleFactIds) {
+    db.prepare('DELETE FROM fact_vectors WHERE rowid = ?').run(staleId)
+  }
+
+  for (let i = 0; i < factsToEmbed.length; i++) {
+    insertFactVector(db, factsToEmbed[i].id, embeddings[i])
   }
 
   // ── 4) 更新 embedding watermark ──
   updateFactEmbedWatermark(drizzleDb)
 
   embeddingLog
-    .withMetadata({ insertedFactVectors: factsNeedingEmbedding.length })
+    .withMetadata({ insertedFactVectors: factsToEmbed.length })
     .info('Fact embeddings stored')
 }

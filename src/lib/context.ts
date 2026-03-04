@@ -210,11 +210,13 @@ export async function assembleContext(params: AssembleContextParams): Promise<Mo
   // ── Facts：組裝輸出區塊（facts section assembly）──
   // 分離 pinned 與 searched facts，供 trimming 時優先移除 searched
   // FACT_MAX_PINNED 限制每位用戶（及群組）的 pinned facts 上限，避免 system prompt 無限膨脹
-  const allPinnedFacts = [...factsById.values()].filter(f => f.pinned)
+  // 以 id（插入順序）排序確保裁剪結果穩定可預測
+  const allPinnedFacts = [...factsById.values()].filter(f => f.pinned).sort((a, b) => a.id - b.id)
   const groupFactsPinned = allPinnedFacts.filter(f => f.scope === 'group').slice(0, config.FACT_MAX_PINNED)
   const groupFactsSearched = searchedFacts.filter(f => f.scope === 'group')
 
   // 用戶 pinned facts 按 user 分組後各自限制上限
+  // allPinnedFacts 已排序，分組後各 user 內部維持 id 順序
   const allUserPinned = allPinnedFacts.filter(f => f.scope === 'user')
   const userPinnedByUser = new Map<string, typeof allUserPinned>()
   for (const f of allUserPinned) {
