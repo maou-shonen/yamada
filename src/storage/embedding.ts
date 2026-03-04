@@ -257,23 +257,15 @@ export function searchSimilarFacts(
 }
 
 /**
- * 批次處理尚未建立向量的 fact。
- * 取得所有 active facts，過濾掉已有向量的，批次 embed 後插入。
+ * 找出需要建立或刷新的 fact 向量。
+ *
+ * WHY：把「新向量 + stale 向量」判斷集中，讓主流程只保留高層步驟。
  */
-export async function processNewFactEmbeddings(
+function findFactsNeedingEmbedding(
   db: Database,
   drizzleDb: DB,
-  config: Config,
-  deps: EmbeddingDeps = defaultDeps,
-): Promise<void> {
-  initFactVectorTable(db, config.EMBEDDING_DIMENSIONS)
-
-  const allFacts = getAllActiveFacts(drizzleDb)
-  if (allFacts.length === 0) {
-    embeddingLog.debug('No facts to process for embedding')
-    return
-  }
-
+  allFacts: ReturnType<typeof getAllActiveFacts>,
+) {
   // 取得上次 embedding 處理的時間戳，用於偵測內容變更
   const lastEmbedTime = drizzleDb
     .select()
@@ -285,32 +277,27 @@ export async function processNewFactEmbeddings(
   // 需要 embedding 的 facts：
   // 1. 尚無向量的新 facts
   // 2. 上次 embedding 後被更新的 facts（content 可能已變更，向量需刷新）
-  const factsNeedingEmbedding = allFacts.filter((fact) => {
+  return allFacts.filter((fact) => {
     const hasVector = db.prepare('SELECT 1 FROM fact_vectors WHERE rowid = ?').get(fact.id)
     if (!hasVector)
       return true
+
     if (fact.updatedAt > lastEmbedTime) {
       // 刪除舊向量，稍後重新 embed
       db.prepare('DELETE FROM fact_vectors WHERE rowid = ?').run(fact.id)
       return true
     }
+
     return false
   })
+}
 
-  if (factsNeedingEmbedding.length === 0) {
-    embeddingLog.debug('All facts already have up-to-date vectors')
-    return
-  }
-
-  // 批次 embed 所有需要建立/刷新向量的 facts
-  const texts = factsNeedingEmbedding.map(f => f.content)
-  const embeddings = await embedTexts(texts, config, deps)
-
-  for (let i = 0; i < factsNeedingEmbedding.length; i++) {
-    insertFactVector(db, factsNeedingEmbedding[i].id, embeddings[i])
-  }
-
-  // 記錄本次 embedding 時間，供下次偵測變更用
+/**
+ * 更新 fact embedding watermark，供下次偵測是否需重建向量。
+ *
+ * WHY：避免主流程混入 metadata 寫入細節，並確保更新語意集中。
+ */
+function updateFactEmbedWatermark(drizzleDb: DB): void {
   drizzleDb.insert(schema.factMetadata)
     .values({ key: 'fact_embed_watermark', value: Date.now() })
     .onConflictDoUpdate({
@@ -318,6 +305,44 @@ export async function processNewFactEmbeddings(
       set: { value: Date.now() },
     })
     .run()
+}
+
+/**
+ * 批次處理尚未建立向量的 fact。
+ * 取得所有 active facts，過濾掉已有向量的，批次 embed 後插入。
+ */
+export async function processNewFactEmbeddings(
+  db: Database,
+  drizzleDb: DB,
+  config: Config,
+  deps: EmbeddingDeps = defaultDeps,
+): Promise<void> {
+  // ── 1) 初始化向量表 ──
+  initFactVectorTable(db, config.EMBEDDING_DIMENSIONS)
+
+  // ── 2) 找出需要 embedding 的 facts（新建 + stale 刷新）──
+  const allFacts = getAllActiveFacts(drizzleDb)
+  if (allFacts.length === 0) {
+    embeddingLog.debug('No facts to process for embedding')
+    return
+  }
+  const factsNeedingEmbedding = findFactsNeedingEmbedding(db, drizzleDb, allFacts)
+
+  if (factsNeedingEmbedding.length === 0) {
+    embeddingLog.debug('All facts already have up-to-date vectors')
+    return
+  }
+
+  // ── 3) 批次 embedding 並寫入向量 ──
+  const texts = factsNeedingEmbedding.map(f => f.content)
+  const embeddings = await embedTexts(texts, config, deps)
+
+  for (let i = 0; i < factsNeedingEmbedding.length; i++) {
+    insertFactVector(db, factsNeedingEmbedding[i].id, embeddings[i])
+  }
+
+  // ── 4) 更新 embedding watermark ──
+  updateFactEmbedWatermark(drizzleDb)
 
   embeddingLog
     .withMetadata({ insertedFactVectors: factsNeedingEmbedding.length })

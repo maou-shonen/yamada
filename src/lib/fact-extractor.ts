@@ -81,51 +81,46 @@ function normalizeCanonicalKey(canonicalKey: string): string {
     .replace(/[^a-z0-9_]/g, '')
 }
 
-export async function extractFacts(
-  messages: FactMessage[],
-  existingFacts: ExistingFactInput[],
+/**
+ * 依序嘗試模型進行 facts 萃取，優先使用 structured output，失敗才降級為文字 JSON。
+ *
+ * WHY：把「雙層呼叫策略」集中，讓 extractFacts 保持高層流程可讀性。
+ */
+async function callFactExtractionLlm(
+  prompt: string,
+  models: ReturnType<typeof parseModelList>,
   config: Config,
-  deps: Partial<FactExtractorDeps> = {},
+  deps: FactExtractorDeps,
 ): Promise<FactExtractionResult[]> {
-  if (messages.length === 0)
-    return []
-
-  const resolvedDeps: FactExtractorDeps = {
-    ...defaultDeps,
-    ...deps,
-  }
-
-  const aliasMap = messages.reduce<Record<string, string>>((acc, message) => {
-    acc[message.userId] = message.userName
-    return acc
-  }, {})
-
-  const prompt = buildFactExtractionPrompt(messages, existingFacts, aliasMap)
-  const models = parseModelList(config.OBSERVER_MODEL)
-  let parsedResults: FactExtractionResult[] | null = null
-
   for (const { provider, modelName } of models) {
     const modelId = `${provider}/${modelName}`
     try {
-      const { object } = await resolvedDeps.generateObject({
-        model: resolvedDeps.createModel(modelId, config),
+      const { object } = await deps.generateObject({
+        model: deps.createModel(modelId, config),
         schema: factExtractionArraySchema,
         prompt,
       })
-      parsedResults = object
-      break
+      return object
     }
     catch {
       continue
     }
   }
 
-  if (!parsedResults) {
-    const rawText = await resolvedDeps.generateWithFallback(prompt, config)
-    const parsedJson = JSON.parse(rawText)
-    parsedResults = factExtractionArraySchema.parse(parsedJson)
-  }
+  const rawText = await deps.generateWithFallback(prompt, config)
+  const parsedJson = JSON.parse(rawText)
+  return factExtractionArraySchema.parse(parsedJson)
+}
 
+/**
+ * 正規化並驗證 LLM 萃取結果，移除不合法或無法套用的項目。
+ *
+ * WHY：把資料清洗規則集中，避免業務流程中混雜細節判斷。
+ */
+function normalizeAndValidateResults(
+  parsedResults: FactExtractionResult[],
+  existingFacts: ExistingFactInput[],
+): FactExtractionResult[] {
   const existingFactIds = new Set(existingFacts.map(f => f.id))
 
   const normalized = parsedResults
@@ -158,4 +153,34 @@ export async function extractFacts(
     .filter((item): item is FactExtractionResult => item !== null)
 
   return factExtractionArraySchema.parse(normalized)
+}
+
+export async function extractFacts(
+  messages: FactMessage[],
+  existingFacts: ExistingFactInput[],
+  config: Config,
+  deps: Partial<FactExtractorDeps> = {},
+): Promise<FactExtractionResult[]> {
+  if (messages.length === 0)
+    return []
+
+  const resolvedDeps: FactExtractorDeps = {
+    ...defaultDeps,
+    ...deps,
+  }
+
+  const aliasMap = messages.reduce<Record<string, string>>((acc, message) => {
+    acc[message.userId] = message.userName
+    return acc
+  }, {})
+
+  // ── 1) 由訊息與既有 facts 組裝 prompt ──
+  const prompt = buildFactExtractionPrompt(messages, existingFacts, aliasMap)
+  const models = parseModelList(config.OBSERVER_MODEL)
+
+  // ── 2) 呼叫 LLM（structured output 優先，文字 JSON 後備）──
+  const parsedResults = await callFactExtractionLlm(prompt, models, config, resolvedDeps)
+
+  // ── 3) 正規化與驗證，回傳乾淨結果 ──
+  return normalizeAndValidateResults(parsedResults, existingFacts)
 }

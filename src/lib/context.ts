@@ -48,6 +48,57 @@ export interface AssembleContextParams {
   deps?: ContextDeps
 }
 
+interface TrimmableSection {
+  name: string
+  budgetKey?: string
+  getValue: () => string
+  setValue: (v: string) => void
+  fallback: () => string
+  canTrim: () => boolean
+}
+
+/**
+ * 依優先序裁剪可移除區塊，直到 token 回到預算內或無區塊可裁。
+ *
+ * WHY：把重複的「超預算就移除某段」邏輯統一成資料驅動流程，
+ * 讓裁剪順序與條件可明確閱讀與維護。
+ */
+function trimSections(
+  sections: TrimmableSection[],
+  maxTokens: number,
+  ratio: number,
+): Set<string> {
+  const estimateTokens = () => {
+    const uniqueValues = new Map<string, string>()
+    for (const section of sections) {
+      const key = section.budgetKey ?? section.name
+      if (!uniqueValues.has(key))
+        uniqueValues.set(key, section.getValue())
+    }
+
+    return Math.ceil([...uniqueValues.values()].filter(Boolean).join('').length / ratio)
+  }
+
+  const trimmed = new Set<string>()
+
+  for (const section of sections) {
+    if (estimateTokens() <= maxTokens)
+      break
+
+    while (estimateTokens() > maxTokens && section.canTrim()) {
+      const current = section.getValue()
+      const next = section.fallback()
+      section.setValue(next)
+      trimmed.add(section.name)
+
+      if (next === current)
+        break
+    }
+  }
+
+  return trimmed
+}
+
 /**
  * 組裝 AI 對話 context。
  *
@@ -94,7 +145,7 @@ export async function assembleContext(params: AssembleContextParams): Promise<Mo
     contextLog.withMetadata({ userCount: userSummaryMap.size }).debug('User summaries loaded')
   }
 
-  // ── Facts 收集 ──
+  // ── Facts：建立查找池（facts pool）──
   // 取得所有 active facts（含 user + group，pinned + non-pinned）建立完整查找池
   // 必須包含所有 active facts，否則語義搜尋回傳的 non-pinned user facts 會找不到對應資料
   const allActiveFacts = deps.getAllActiveFacts(db)
@@ -136,6 +187,7 @@ export async function assembleContext(params: AssembleContextParams): Promise<Mo
     }
   }
 
+  // ── Facts：語義搜尋（fact semantic search）──
   // Fact 語義搜尋（獨立容錯，embedding 失敗時自然跳過）
   const searchedFacts: Fact[] = []
   if (queryEmbedding) {
@@ -159,7 +211,7 @@ export async function assembleContext(params: AssembleContextParams): Promise<Mo
     }
   }
 
-  // ── Facts 區塊組裝 ──
+  // ── Facts：組裝輸出區塊（facts section assembly）──
   // 分離 pinned 與 searched facts，供 trimming 時優先移除 searched
   const pinnedFacts = [...factsById.values()].filter(f => f.pinned)
   const groupFactsPinned = pinnedFacts.filter(f => f.scope === 'group')
@@ -186,58 +238,96 @@ export async function assembleContext(params: AssembleContextParams): Promise<Mo
   let groupFactsSection = buildGroupFactsXml([...groupFactsPinned, ...groupFactsSearched])
   let userFactsSection = buildUserFactsXml([...userFactsPinned, ...userFactsSearched])
 
-  // ── Token 預算裁剪 ──
+  // ── Token 預算裁剪：準備上下文狀態 ──
   // 裁剪順序（最先移除 → 最後移除）：
   // related_history → user_facts searched → group_facts searched → user_profiles → group_summary
   // SOUL 永不裁剪。Facts 中先移除 searched（non-pinned），盡量保留 pinned。
   const maxTokens = config.CONTEXT_MAX_TOKENS
-  const allParts = () => [soulSection, groupSummarySection, groupFactsSection, userSummarySection, userFactsSection, semanticSection]
-  const estimateTokens = (parts: string[]) => Math.ceil(parts.filter(Boolean).join('').length / ratio)
-  let trimmedSemantic = false
-  let trimmedUserFactsSearched = false
-  let trimmedGroupFactsSearched = false
-  let trimmedUserSummaries = false
-  let trimmedGroupSummary = false
-  let trimmedUserFactsPinned = false
-  let trimmedGroupFactsPinned = false
 
-  if (estimateTokens(allParts()) > maxTokens && semanticSection) {
-    semanticSection = ''
-    trimmedSemantic = true
-  }
-  if (estimateTokens(allParts()) > maxTokens && userFactsSearched.length > 0) {
-    userFactsSection = buildUserFactsXml(userFactsPinned)
-    trimmedUserFactsSearched = true
-  }
-  if (estimateTokens(allParts()) > maxTokens && groupFactsSearched.length > 0) {
-    groupFactsSection = buildGroupFactsXml(groupFactsPinned)
-    trimmedGroupFactsSearched = true
-  }
-  if (estimateTokens(allParts()) > maxTokens && userSummarySection) {
-    userSummarySection = ''
-    trimmedUserSummaries = true
-  }
-  if (estimateTokens(allParts()) > maxTokens && groupSummarySection) {
-    groupSummarySection = ''
-    trimmedGroupSummary = true
-  }
-  // Pinned facts 通常很小，但極端情況下仍可能超出預算——逐筆移除
-  if (estimateTokens(allParts()) > maxTokens && userFactsPinned.length > 0) {
-    for (let i = userFactsPinned.length - 1; i >= 0; i--) {
-      userFactsSection = i > 0 ? buildUserFactsXml(userFactsPinned.slice(0, i)) : ''
-      trimmedUserFactsPinned = true
-      if (estimateTokens(allParts()) <= maxTokens)
-        break
-    }
-  }
-  if (estimateTokens(allParts()) > maxTokens && groupFactsPinned.length > 0) {
-    for (let i = groupFactsPinned.length - 1; i >= 0; i--) {
-      groupFactsSection = i > 0 ? buildGroupFactsXml(groupFactsPinned.slice(0, i)) : ''
-      trimmedGroupFactsPinned = true
-      if (estimateTokens(allParts()) <= maxTokens)
-        break
-    }
-  }
+  // ── Token 預算裁剪：建立裁剪優先序 ──
+  let userPinnedRemain = userFactsPinned.length
+  let groupPinnedRemain = groupFactsPinned.length
+
+  const trimmableSections: TrimmableSection[] = [
+    {
+      name: 'soul',
+      getValue: () => soulSection,
+      setValue: () => {},
+      fallback: () => soulSection,
+      canTrim: () => false,
+    },
+    {
+      name: 'semantic',
+      getValue: () => semanticSection,
+      setValue: (value) => { semanticSection = value },
+      fallback: () => '',
+      canTrim: () => !!semanticSection,
+    },
+    {
+      name: 'user_facts_searched',
+      budgetKey: 'user_facts_section',
+      getValue: () => userFactsSection,
+      setValue: (value) => { userFactsSection = value },
+      fallback: () => buildUserFactsXml(userFactsPinned),
+      canTrim: () => userFactsSearched.length > 0 && userFactsSection !== buildUserFactsXml(userFactsPinned),
+    },
+    {
+      name: 'group_facts_searched',
+      budgetKey: 'group_facts_section',
+      getValue: () => groupFactsSection,
+      setValue: (value) => { groupFactsSection = value },
+      fallback: () => buildGroupFactsXml(groupFactsPinned),
+      canTrim: () => groupFactsSearched.length > 0 && groupFactsSection !== buildGroupFactsXml(groupFactsPinned),
+    },
+    {
+      name: 'user_profiles',
+      getValue: () => userSummarySection,
+      setValue: (value) => { userSummarySection = value },
+      fallback: () => '',
+      canTrim: () => !!userSummarySection,
+    },
+    {
+      name: 'group_summary',
+      getValue: () => groupSummarySection,
+      setValue: (value) => { groupSummarySection = value },
+      fallback: () => '',
+      canTrim: () => !!groupSummarySection,
+    },
+    {
+      name: 'user_facts_pinned',
+      budgetKey: 'user_facts_section',
+      getValue: () => userFactsSection,
+      setValue: (value) => { userFactsSection = value },
+      fallback: () => {
+        userPinnedRemain--
+        return userPinnedRemain > 0 ? buildUserFactsXml(userFactsPinned.slice(0, userPinnedRemain)) : ''
+      },
+      canTrim: () => userPinnedRemain > 0,
+    },
+    {
+      name: 'group_facts_pinned',
+      budgetKey: 'group_facts_section',
+      getValue: () => groupFactsSection,
+      setValue: (value) => { groupFactsSection = value },
+      fallback: () => {
+        groupPinnedRemain--
+        return groupPinnedRemain > 0 ? buildGroupFactsXml(groupFactsPinned.slice(0, groupPinnedRemain)) : ''
+      },
+      canTrim: () => groupPinnedRemain > 0,
+    },
+  ]
+
+  // ── Token 預算裁剪：依序執行裁剪 ──
+  const trimmedSections = trimSections(trimmableSections, maxTokens, ratio)
+
+  // ── Token 預算裁剪：彙整裁剪結果 ──
+  const trimmedSemantic = trimmedSections.has('semantic')
+  const trimmedUserFactsSearched = trimmedSections.has('user_facts_searched')
+  const trimmedGroupFactsSearched = trimmedSections.has('group_facts_searched')
+  const trimmedUserSummaries = trimmedSections.has('user_profiles')
+  const trimmedGroupSummary = trimmedSections.has('group_summary')
+  const trimmedUserFactsPinned = trimmedSections.has('user_facts_pinned')
+  const trimmedGroupFactsPinned = trimmedSections.has('group_facts_pinned')
 
   // Context 順序：SOUL > group_summary > group_facts > user_profiles > user_facts > related_history
   const systemPrompt = [soulSection, groupSummarySection, groupFactsSection, userSummarySection, userFactsSection, semanticSection].filter(Boolean).join('\n\n')

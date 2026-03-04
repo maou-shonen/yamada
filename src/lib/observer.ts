@@ -189,40 +189,27 @@ export async function compressUserSummaries(
 }
 
 /**
- * 完整 Observer 流程。
+ * 執行 facts 萃取階段，並在成功時推進 fact watermark 與更新向量索引。
  *
- * 增量壓縮迴圈：
- * 1. shouldRun 用 watermark 計算新訊息數是否達 threshold
- * 2. getDistinctUserIds 用 watermark 只取新訊息中的活躍用戶（不載入完整 row）
- * 3. compressGroupSummary / compressUserSummaries 各自用 watermark 只取新訊息
- * 4. upsertGroupSummary 更新 updated_at → 成為下次的 watermark
+ * WHY：把「讀訊息 → 呼叫 LLM → 寫回 facts → 更新 watermark/embed」集中在單一 helper，
+ * 讓 runObserver 主流程保留高層步驟，降低認知負擔。
  */
-export async function runObserver(
+async function runFactExtraction(
   db: DB,
   sqliteDb: Database,
   config: Config,
-  deps: ObserverDeps = defaultDeps,
-): Promise<void> {
-  if (!shouldRun(db, config)) {
-    observerLog.debug('Observer skipped (threshold not met)')
-    return
-  }
-
-  observerLog.info('Observer triggered')
-
-  // 在頂層擷取 watermark 並傳遞給兩個 compress 函式，
-  // 避免 compressGroupSummary 更新 updated_at 後影響 compressUserSummaries 讀到的 watermark
-  const watermark = getWatermark(db)
-  const factWatermark = deps.getFactWatermark(db)
-  const userIds = deps.getDistinctUserIds(db, watermark)
-
+  deps: ObserverDeps,
+) {
   // 在取訊息前先記錄時間戳，避免 extraction 執行期間新訊息被 watermark 跳過
   const factExtractionStartTime = Date.now()
+  const factWatermark = deps.getFactWatermark(db)
   const messagesSinceFactWatermark = deps.getMessagesSince(db, new Date(factWatermark))
+
   // 首次執行（factWatermark=0）會載入全部歷史，限制筆數避免 prompt 過大
   const nonBotMessages = messagesSinceFactWatermark
     .filter(m => !m.isBot)
     .slice(-200)
+
   const allActiveFacts = deps.getAllActiveFacts(db)
   const existingFacts = allActiveFacts
     .filter((fact): fact is typeof fact & { scope: 'user' | 'group' } => fact.scope === 'user' || fact.scope === 'group')
@@ -240,9 +227,8 @@ export async function runObserver(
     const results = await deps.extractFacts(factMessages, existingFacts, config)
 
     for (const result of results) {
-      if (result.action === 'supersede' && result.targetFactId !== undefined) {
+      if (result.action === 'supersede' && result.targetFactId !== undefined)
         deps.supersedeFact(db, result.targetFactId)
-      }
 
       deps.upsertFact(db, {
         scope: result.scope,
@@ -262,7 +248,18 @@ export async function runObserver(
     observerLog.withError(err instanceof Error ? err : new Error(String(err))).warn('Fact extraction failed, continuing with summary compression')
   }
 
-  // 一次取得所有 pinned facts 並在記憶體中分組，避免 per-user N+1 查詢
+  return allActiveFacts
+}
+
+/**
+ * 收集 pinned facts，分為群組層級與使用者層級，供摘要壓縮 prompt 注入。
+ *
+ * WHY：一次在記憶體分組可避免 per-user N+1 查詢，也讓 pinned 組裝邏輯可獨立測讀。
+ */
+function collectPinnedFacts(
+  allActiveFacts: ReturnType<ObserverDeps['getAllActiveFacts']>,
+  userIds: string[],
+): { groupPinnedText: string | undefined, userPinnedTextMap: Map<string, string> } {
   const allPinnedFacts = allActiveFacts.filter(f => f.pinned)
   const groupPinnedText = allPinnedFacts
     .filter(f => f.scope === 'group')
@@ -272,10 +269,46 @@ export async function runObserver(
   const userPinnedTextMap = new Map<string, string>()
   for (const userId of userIds) {
     const userPinned = allPinnedFacts.filter(f => f.scope === 'user' && f.userId === userId)
-    if (userPinned.length > 0) {
+    if (userPinned.length > 0)
       userPinnedTextMap.set(userId, userPinned.map(f => f.content).join('\n'))
-    }
   }
+
+  return { groupPinnedText, userPinnedTextMap }
+}
+
+/**
+ * 完整 Observer 流程。
+ *
+ * 增量壓縮迴圈：
+ * 1. shouldRun 用 watermark 計算新訊息數是否達 threshold
+ * 2. getDistinctUserIds 用 watermark 只取新訊息中的活躍用戶（不載入完整 row）
+ * 3. compressGroupSummary / compressUserSummaries 各自用 watermark 只取新訊息
+ * 4. upsertGroupSummary 更新 updated_at → 成為下次的 watermark
+ */
+export async function runObserver(
+  db: DB,
+  sqliteDb: Database,
+  config: Config,
+  deps: ObserverDeps = defaultDeps,
+): Promise<void> {
+  // ── 1) 應否觸發 Observer ──
+  if (!shouldRun(db, config)) {
+    observerLog.debug('Observer skipped (threshold not met)')
+    return
+  }
+
+  observerLog.info('Observer triggered')
+
+  // 在頂層擷取 watermark 並傳遞給兩個 compress 函式，
+  // 避免 compressGroupSummary 更新 updated_at 後影響 compressUserSummaries 讀到的 watermark
+  const watermark = getWatermark(db)
+  const userIds = deps.getDistinctUserIds(db, watermark)
+
+  // ── 2) Facts 萃取 ──
+  const allActiveFacts = await runFactExtraction(db, sqliteDb, config, deps)
+
+  // ── 3) 收集 pinned facts，執行摘要壓縮 ──
+  const { groupPinnedText, userPinnedTextMap } = collectPinnedFacts(allActiveFacts, userIds)
 
   await compressGroupSummary(db, watermark, config, deps, groupPinnedText)
 
