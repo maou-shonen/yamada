@@ -17,11 +17,9 @@ interface ExistingFact {
 export function buildFactExtractionPrompt(
   messages: FactMessage[],
   existingFacts: ExistingFact[],
-  aliasMap: Record<string, string>,
 ): string {
   const messagesText = JSON.stringify(messages, null, 2)
   const existingFactsText = JSON.stringify(existingFacts, null, 2)
-  const aliasMapText = JSON.stringify(aliasMap, null, 2)
 
   return `你是一個對話事實抽取器。請閱讀對話並抽取可長期保存的高信心事實。
 
@@ -40,9 +38,6 @@ export function buildFactExtractionPrompt(
 6. bot 訊息已在上游過濾，不需額外處理。
 
 輸入資料：
-- alias_map（userId -> displayName）
-${aliasMapText}
-
 - conversation_messages
 ${messagesText}
 
@@ -64,6 +59,7 @@ ${existingFactsText}
 
 約束：
 - scope="user" 時，userId 必須來自 conversation_messages。
+- content 裡使用 displayName 指稱用戶，不要使用 userId。
 - scope="group" 時，不要輸出 userId。
 - action="supersede" 時，targetFactId 必須指向 existing_facts 中的 id。
 - 若沒有可靠新事實，輸出空陣列 []。`

@@ -3,6 +3,7 @@ import type { FactExtractorDeps } from './fact-extractor'
 import { describe, expect, test } from 'bun:test'
 import { createTestConfig } from '../__tests__/helpers/config.ts'
 import { extractFacts } from './fact-extractor'
+import { createUserMask } from './user-mask'
 
 function makeConfig(overrides: Partial<Config> = {}): Config {
   return createTestConfig({
@@ -23,7 +24,7 @@ function createFakeDeps(overrides: Partial<FactExtractorDeps> = {}): Partial<Fac
 describe('extractFacts', () => {
   test('空訊息 → 回傳 []', async () => {
     const config = makeConfig()
-    const result = await extractFacts([], [], config, createFakeDeps())
+    const result = await extractFacts([], [], config, undefined, createFakeDeps())
     expect(result).toEqual([])
   })
 
@@ -46,6 +47,7 @@ describe('extractFacts', () => {
       [{ userId: 'alice', userName: 'Alice', content: '我養了一隻貓', createdAt: Date.now() }],
       [],
       config,
+      undefined,
       deps,
     )
 
@@ -79,6 +81,7 @@ describe('extractFacts', () => {
       [{ userId: 'alice', userName: 'Alice', content: '我養了一隻貓', createdAt: Date.now() }],
       [],
       config,
+      undefined,
       deps,
     )
 
@@ -102,6 +105,7 @@ describe('extractFacts', () => {
       [{ userId: 'alice', userName: 'Alice', content: '我們每週五聚餐', createdAt: Date.now() }],
       [],
       config,
+      undefined,
       deps,
     )
 
@@ -135,9 +139,48 @@ describe('extractFacts', () => {
       [{ userId: 'alice', userName: 'Alice', content: '我養了一隻貓', createdAt: Date.now() }],
       [],
       config,
+      undefined,
       deps,
     )
 
     expect(result.length).toBe(0)
+  })
+
+  test('userId 掩碼：LLM 回傳 alias → unmask 為原始 userId', async () => {
+    const config = makeConfig()
+    const userMask = createUserMask(new Map([
+      ['discord:123', { alias: 'user_bright_owl', userName: 'Alice' }],
+    ]))
+    const deps = createFakeDeps({
+      generateObject: (async () => ({
+        object: [{
+          action: 'insert',
+          scope: 'user',
+          userId: 'user_bright_owl',
+          canonicalKey: 'pet_preference',
+          content: '喜歡貓',
+          confidence: 0.95,
+        }],
+      })) as unknown as FactExtractorDeps['generateObject'],
+    })
+
+    const result = await extractFacts(
+      [{ userId: 'user_bright_owl', userName: 'user_bright_owl', content: '我喜歡貓', createdAt: Date.now() }],
+      [],
+      config,
+      userMask,
+      deps,
+    )
+
+    expect(result).toEqual([
+      {
+        action: 'insert',
+        scope: 'user',
+        userId: 'discord:123',
+        canonicalKey: 'pet_preference',
+        content: '喜歡貓',
+        confidence: 0.95,
+      },
+    ])
   })
 })

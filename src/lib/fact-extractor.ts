@@ -1,5 +1,6 @@
 import type { LanguageModel } from 'ai'
 import type { Config } from '../config/index.ts'
+import type { UserMask } from './user-mask.ts'
 import { generateObject } from 'ai'
 import { z } from 'zod'
 import { buildFactExtractionPrompt } from '../prompts/facts.ts'
@@ -159,6 +160,7 @@ export async function extractFacts(
   messages: FactMessage[],
   existingFacts: ExistingFactInput[],
   config: Config,
+  userMask?: UserMask,
   deps: Partial<FactExtractorDeps> = {},
 ): Promise<FactExtractionResult[]> {
   if (messages.length === 0)
@@ -169,18 +171,26 @@ export async function extractFacts(
     ...deps,
   }
 
-  const aliasMap = messages.reduce<Record<string, string>>((acc, message) => {
-    acc[message.userId] = message.userName
-    return acc
-  }, {})
-
   // ── 1) 由訊息與既有 facts 組裝 prompt ──
-  const prompt = buildFactExtractionPrompt(messages, existingFacts, aliasMap)
+  const prompt = buildFactExtractionPrompt(messages, existingFacts)
   const models = parseModelList(config.OBSERVER_MODEL)
 
   // ── 2) 呼叫 LLM（structured output 優先，文字 JSON 後備）──
   const parsedResults = await callFactExtractionLlm(prompt, models, config, resolvedDeps)
 
-  // ── 3) 正規化與驗證，回傳乾淨結果 ──
-  return normalizeAndValidateResults(parsedResults, existingFacts)
+  // ── 3) 正規化與驗證，必要時將 alias 還原為原始 userId ──
+  const normalizedResults = normalizeAndValidateResults(parsedResults, existingFacts)
+
+  if (!userMask)
+    return normalizedResults
+
+  return normalizedResults.map((result) => {
+    if (!result.userId)
+      return result
+
+    return {
+      ...result,
+      userId: userMask.unmask(result.userId),
+    }
+  })
 }

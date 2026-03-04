@@ -24,6 +24,7 @@ import {
 import { getAliasMap } from '../storage/user-aliases'
 import { extractFacts } from './fact-extractor.ts'
 import { generateWithFallback } from './llm-utils.ts'
+import { createUserMask } from './user-mask.ts'
 
 const observerLog = log.withPrefix('[Observer]')
 
@@ -217,16 +218,26 @@ async function runFactExtraction(
     .filter((fact): fact is typeof fact & { scope: 'user' | 'group' } => fact.scope === 'user' || fact.scope === 'group')
 
   try {
-    const factUserIds = [...new Set(nonBotMessages.map(m => m.userId))]
-    const aliasMap = await deps.getAliasMap(db, factUserIds)
+    const allFactUserIds = [...new Set([
+      ...nonBotMessages.map(m => m.userId),
+      ...existingFacts.flatMap(f => f.userId !== null ? [f.userId] : []),
+    ])]
+    const aliasMap = await deps.getAliasMap(db, allFactUserIds)
+    const userMask = createUserMask(aliasMap)
+
     const factMessages = nonBotMessages.map(m => ({
-      userId: m.userId,
+      userId: userMask.mask(m.userId),
       userName: aliasMap.get(m.userId)?.alias ?? aliasMap.get(m.userId)?.userName ?? m.userId,
       content: m.content,
       createdAt: m.timestamp,
     }))
 
-    const results = await deps.extractFacts(factMessages, existingFacts, config)
+    const maskedExistingFacts = existingFacts.map(f => ({
+      ...f,
+      userId: f.userId !== null ? userMask.mask(f.userId) : null,
+    }))
+
+    const results = await deps.extractFacts(factMessages, maskedExistingFacts, config, userMask)
 
     for (const result of results) {
       if (result.action === 'supersede' && result.targetFactId !== undefined)
