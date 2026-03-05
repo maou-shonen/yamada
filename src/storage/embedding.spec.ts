@@ -1,14 +1,17 @@
 import type { EmbeddingDeps } from './embedding'
 import { Database } from 'bun:sqlite'
-import { afterEach, beforeEach, expect, mock, test } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
 import { createTestConfig } from '../__tests__/helpers/config.ts'
 import { setupTestDb } from '../__tests__/helpers/setup-db.ts'
 import {
   embedText,
   initChunkVectorTable,
+  initFactVectorTable,
   insertChunkVector,
+  insertFactVector,
   processNewChunks,
   searchSimilarChunks,
+  searchSimilarFacts,
 } from './embedding'
 import * as schema from './schema'
 
@@ -181,4 +184,91 @@ test('searchSimilarChunks threshold 過濾', () => {
   // 使用差異極大的查詢向量，確保距離 >> 0.0001，threshold 應過濾掉所有結果
   const results = searchSimilarChunks(db, [0.9, 0.9, 0.9, 0.9], 5, 0.0001)
   expect(results).toEqual([])
+})
+
+// ─── Fact Vectors 測試 ───
+
+describe('fact vectors', () => {
+  let factDb: Database
+
+  beforeEach(() => {
+    factDb = new Database(':memory:')
+  })
+
+  afterEach(() => {
+    factDb.close()
+  })
+
+  test('initFactVectorTable creates fact_vectors table', () => {
+    expect(() => initFactVectorTable(factDb, 4)).not.toThrow()
+
+    const tables = factDb
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'fact_vectors%'")
+      .all() as Array<{ name: string }>
+    expect(tables.length).toBeGreaterThan(0)
+  })
+
+  test('initFactVectorTable is idempotent (calling twice does not throw)', () => {
+    expect(() => initFactVectorTable(factDb, 4)).not.toThrow()
+    expect(() => initFactVectorTable(factDb, 4)).not.toThrow()
+  })
+
+  test('insertFactVector inserts vector for factId without error', () => {
+    initFactVectorTable(factDb, 4)
+    expect(() => insertFactVector(factDb, 1, [0.1, 0.2, 0.3, 0.4])).not.toThrow()
+
+    const row = factDb.prepare('SELECT rowid FROM fact_vectors WHERE rowid = ?').get(1) as { rowid: number } | null
+    expect(row).not.toBeNull()
+    expect(row?.rowid).toBe(1)
+  })
+
+  test('insertFactVector is idempotent (same factId again does not throw)', () => {
+    initFactVectorTable(factDb, 4)
+    insertFactVector(factDb, 1, [0.1, 0.2, 0.3, 0.4])
+    expect(() => insertFactVector(factDb, 1, [0.1, 0.2, 0.3, 0.4])).not.toThrow()
+  })
+
+  test('searchSimilarFacts returns closest factId first', () => {
+    initFactVectorTable(factDb, 4)
+    insertFactVector(factDb, 1, [0.1, 0.2, 0.3, 0.4]) // closer
+    insertFactVector(factDb, 2, [0.9, 0.9, 0.9, 0.9]) // farther
+
+    const results = searchSimilarFacts(factDb, [0.1, 0.2, 0.3, 0.4], 5, 999)
+    expect(results).toHaveLength(2)
+    expect(results[0].distance).toBeLessThanOrEqual(results[1].distance)
+    expect(results[0].factId).toBe(1)
+  })
+
+  test('searchSimilarFacts returns empty array on empty table', () => {
+    initFactVectorTable(factDb, 4)
+    const results = searchSimilarFacts(factDb, [0.1, 0.2, 0.3, 0.4], 5, 999)
+    expect(results).toEqual([])
+  })
+
+  test('searchSimilarFacts threshold filtering excludes distant results', () => {
+    initFactVectorTable(factDb, 4)
+    insertFactVector(factDb, 1, [0.1, 0.2, 0.3, 0.4])
+
+    const results = searchSimilarFacts(factDb, [0.9, 0.9, 0.9, 0.9], 5, 0.0001)
+    expect(results).toEqual([])
+  })
+
+  test('chunk_vectors and fact_vectors coexist independently on same DB', () => {
+    initChunkVectorTable(factDb, 4)
+    initFactVectorTable(factDb, 4)
+
+    // Insert into both with same rowid
+    insertChunkVector(factDb, 1, [0.1, 0.2, 0.3, 0.4])
+    insertFactVector(factDb, 1, [0.9, 0.8, 0.7, 0.6])
+
+    // Search chunks — should find chunk vector
+    const chunkResults = searchSimilarChunks(factDb, [0.1, 0.2, 0.3, 0.4], 5, 999)
+    expect(chunkResults).toHaveLength(1)
+    expect(chunkResults[0].chunkId).toBe(1)
+
+    // Search facts — should find fact vector
+    const factResults = searchSimilarFacts(factDb, [0.9, 0.8, 0.7, 0.6], 5, 999)
+    expect(factResults).toHaveLength(1)
+    expect(factResults[0].factId).toBe(1)
+  })
 })

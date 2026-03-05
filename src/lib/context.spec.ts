@@ -44,6 +44,8 @@ function createFakeDeps(): ContextDeps {
     searchSimilarChunks: (() => []) as unknown as ContextDeps['searchSimilarChunks'],
     getChunkContents: (() => []) as unknown as ContextDeps['getChunkContents'],
     getAliasMap: (async () => new Map()) as unknown as ContextDeps['getAliasMap'],
+    getAllActiveFacts: (() => []) as unknown as ContextDeps['getAllActiveFacts'],
+    searchSimilarFacts: (() => []) as unknown as ContextDeps['searchSimilarFacts'],
   }
 }
 
@@ -366,5 +368,155 @@ describe('buildChatMessages', () => {
     const result = buildChatMessages(msgs)
     expect(result.length).toBe(2)
     expect(result.every(m => m.role === 'assistant')).toBe(true)
+  })
+})
+
+describe('facts injection', () => {
+  function makeFact(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 1,
+      scope: 'group',
+      userId: null,
+      canonicalKey: 'weekly_dinner',
+      content: '群組每週五聚餐',
+      confidence: 0.9,
+      evidenceCount: 1,
+      status: 'active',
+      pinned: true,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      ...overrides,
+    }
+  }
+
+  test('Pinned group fact 注入 → system prompt 包含 <group_facts>', async () => {
+    const { sqlite, db } = setupTestDb()
+    const config = makeConfig()
+    const pinnedFact = makeFact()
+
+    const deps: ContextDeps = {
+      ...createFakeDeps(),
+      getAllActiveFacts: (() => [pinnedFact]) as unknown as ContextDeps['getAllActiveFacts'],
+    }
+
+    const messages = await assembleContext({
+      recentMessages: [makeMessage({ userId: 'u1', content: 'Hi' })],
+      config,
+      db,
+      sqliteDb: sqlite,
+      deps,
+    })
+
+    expect(messages[0].content).toContain('<group_facts>')
+    expect(messages[0].content).toContain('群組每週五聚餐')
+    expect(messages[0].content).toContain('</group_facts>')
+  })
+
+  test('embeddingEnabled=false → 只有 pinned facts，不呼叫 searchSimilarFacts', async () => {
+    const { sqlite, db } = setupTestDb()
+    const config = makeConfig({ embeddingEnabled: false })
+    const pinnedFact = makeFact()
+
+    let searchSimilarFactsCalled = false
+    const deps: ContextDeps = {
+      ...createFakeDeps(),
+      getAllActiveFacts: (() => [pinnedFact]) as unknown as ContextDeps['getAllActiveFacts'],
+      searchSimilarFacts: ((..._args: unknown[]) => {
+        searchSimilarFactsCalled = true
+        return []
+      }) as unknown as ContextDeps['searchSimilarFacts'],
+    }
+
+    const messages = await assembleContext({
+      recentMessages: [makeMessage({ userId: 'u1', content: 'Hi' })],
+      config,
+      db,
+      sqliteDb: sqlite,
+      deps,
+    })
+
+    expect(searchSimilarFactsCalled).toBe(false)
+    expect(messages[0].content).toContain('<group_facts>')
+    expect(messages[0].content).toContain('群組每週五聚餐')
+  })
+
+  test('Token trimming：searched facts 先於 pinned facts 被裁剪', async () => {
+    const { sqlite, db } = setupTestDb()
+
+    const pinnedFact = makeFact({ id: 1, content: 'pinned fact', pinned: true })
+    const searchableFact = makeFact({ id: 2, content: 'searched fact', pinned: false })
+
+    // SOUL='S' → <soul>\nS\n</soul> = 16 chars
+    // groupFacts with both: <group_facts>\npinned fact\nsearched fact\n</group_facts> = 54 chars
+    // Total with both: 70 chars → ceil(70/3) = 24 tokens
+    // groupFacts pinned only: <group_facts>\npinned fact\n</group_facts> = 40 chars
+    // Total without searched: 56 chars → ceil(56/3) = 19 tokens
+    const config = makeConfig({
+      SOUL: 'S',
+      CONTEXT_MAX_TOKENS: 22,
+      CONTEXT_TOKEN_ESTIMATE_RATIO: 3,
+      embeddingEnabled: true,
+    })
+
+    const deps: ContextDeps = {
+      ...createFakeDeps(),
+      getAllActiveFacts: (() => [pinnedFact, searchableFact]) as unknown as ContextDeps['getAllActiveFacts'],
+      searchSimilarFacts: (() => [{ factId: 2, distance: 0.5 }]) as unknown as ContextDeps['searchSimilarFacts'],
+    }
+
+    const messages = await assembleContext({
+      recentMessages: [makeMessage({ userId: 'u1', content: 'Hi' })],
+      config,
+      db,
+      sqliteDb: sqlite,
+      deps,
+    })
+
+    // pinned fact 保留、searched fact 被裁剪
+    expect(messages[0].content).toContain('pinned fact')
+    expect(messages[0].content).not.toContain('searched fact')
+  })
+
+  test('FACT_MAX_PINNED：超過上限的 pinned facts 被截斷', async () => {
+    const { sqlite, db } = setupTestDb()
+
+    // 建立 6 個 group pinned facts，上限設為 2
+    const groupPinned = Array.from({ length: 6 }, (_, i) =>
+      makeFact({ id: i + 1, scope: 'group', content: `group-fact-${i + 1}`, pinned: true }),
+    )
+    // 建立 4 個 user pinned facts（同一 user），上限設為 2
+    const userPinned = Array.from({ length: 4 }, (_, i) =>
+      makeFact({ id: 100 + i, scope: 'user', userId: 'u1', content: `user-fact-${i + 1}`, pinned: true }),
+    )
+
+    const config = makeConfig({
+      FACT_MAX_PINNED: 2,
+      embeddingEnabled: false,
+    })
+
+    const deps: ContextDeps = {
+      ...createFakeDeps(),
+      getAllActiveFacts: (() => [...groupPinned, ...userPinned]) as unknown as ContextDeps['getAllActiveFacts'],
+    }
+
+    const messages = await assembleContext({
+      recentMessages: [makeMessage({ userId: 'u1', content: 'Hi' })],
+      config,
+      db,
+      sqliteDb: sqlite,
+      deps,
+    })
+
+    const systemPrompt = messages[0].content as string
+
+    // group: 只保留前 2 個
+    expect(systemPrompt).toContain('group-fact-1')
+    expect(systemPrompt).toContain('group-fact-2')
+    expect(systemPrompt).not.toContain('group-fact-3')
+
+    // user: 只保留前 2 個
+    expect(systemPrompt).toContain('user-fact-1')
+    expect(systemPrompt).toContain('user-fact-2')
+    expect(systemPrompt).not.toContain('user-fact-3')
   })
 })

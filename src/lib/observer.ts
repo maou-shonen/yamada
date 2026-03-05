@@ -1,10 +1,18 @@
-import type { LanguageModel } from 'ai'
+import type { Database } from 'bun:sqlite'
 import type { Config } from '../config/index.ts'
 import type { DB } from '../storage/db'
-import { generateText } from 'ai'
 import { count, gt } from 'drizzle-orm'
 import { log } from '../logger'
 import { buildGroupCompressionPrompt, buildUserCompressionPrompt, formatChatHistory } from '../prompts/observer'
+import { processNewFactEmbeddings } from '../storage/embedding'
+import {
+  getAllActiveFacts,
+  getFactWatermark,
+  getPinnedFacts,
+  setFactWatermark,
+  supersedeFact,
+  upsertFact,
+} from '../storage/facts'
 import { getDistinctUserIds, getMessagesByUser, getMessagesSince } from '../storage/messages'
 import * as schema from '../storage/schema'
 import {
@@ -14,16 +22,25 @@ import {
   upsertUserSummary,
 } from '../storage/summaries'
 import { getAliasMap } from '../storage/user-aliases'
-import { createModelFromId, parseModelList } from './provider.ts'
+import { extractFacts } from './fact-extractor.ts'
+import { generateWithFallback } from './llm-utils.ts'
+import { createUserMask } from './alias-replacer.ts'
 
 const observerLog = log.withPrefix('[Observer]')
 
 export interface ObserverDeps {
-  generateText: typeof import('ai').generateText
-  createModel: (modelId: string, config: Config) => LanguageModel
   getMessagesSince: typeof getMessagesSince
   getMessagesByUser: typeof getMessagesByUser
   getDistinctUserIds: typeof getDistinctUserIds
+  extractFacts: typeof extractFacts
+  upsertFact: typeof upsertFact
+  supersedeFact: typeof supersedeFact
+  getAllActiveFacts: typeof getAllActiveFacts
+  getPinnedFacts: typeof getPinnedFacts
+  getFactWatermark: typeof getFactWatermark
+  setFactWatermark: typeof setFactWatermark
+  processNewFactEmbeddings: typeof processNewFactEmbeddings
+  generateWithFallback: typeof generateWithFallback
   getGroupSummary: typeof getGroupSummary
   upsertGroupSummary: typeof upsertGroupSummary
   getUserSummary: typeof getUserSummary
@@ -32,11 +49,18 @@ export interface ObserverDeps {
 }
 
 const defaultDeps: ObserverDeps = {
-  generateText,
-  createModel: createModelFromId,
   getMessagesSince,
   getMessagesByUser,
   getDistinctUserIds,
+  extractFacts,
+  upsertFact,
+  supersedeFact,
+  getAllActiveFacts,
+  getPinnedFacts,
+  getFactWatermark,
+  setFactWatermark,
+  processNewFactEmbeddings,
+  generateWithFallback,
   getGroupSummary,
   upsertGroupSummary,
   getUserSummary,
@@ -91,43 +115,6 @@ export function shouldRun(db: DB, config: Config): boolean {
 }
 
 /**
- * 使用 OBSERVER_MODEL 的 fallback 列表呼叫 LLM。
- * 依序嘗試每個模型，失敗時自動切換到下一個。
- */
-async function generateWithFallback(
-  prompt: string,
-  config: Config,
-  deps: ObserverDeps,
-): Promise<string> {
-  const models = parseModelList(config.OBSERVER_MODEL)
-  let lastError: unknown
-
-  for (let i = 0; i < models.length; i++) {
-    const { provider, modelName } = models[i]
-    const fullModelId = `${provider}/${modelName}`
-
-    try {
-      const result = await deps.generateText({
-        model: deps.createModel(fullModelId, config),
-        messages: [{ role: 'user', content: prompt }],
-      })
-      return result.text
-    }
-    catch (error) {
-      lastError = error
-      const isLastModel = i === models.length - 1
-      if (!isLastModel) {
-        observerLog
-          .withMetadata({ failedModel: fullModelId, nextModel: `${models[i + 1].provider}/${models[i + 1].modelName}` })
-          .warn('Observer model failed, trying fallback')
-      }
-    }
-  }
-
-  throw lastError
-}
-
-/**
  * 壓縮群組摘要。
  *
  * 基於「舊摘要 + watermark 之後的新訊息」增量壓縮。
@@ -143,6 +130,7 @@ export async function compressGroupSummary(
   watermark: number,
   config: Config,
   deps: ObserverDeps = defaultDeps,
+  pinnedFacts?: string,
 ): Promise<void> {
   observerLog.info('Compressing group summary')
 
@@ -157,9 +145,9 @@ export async function compressGroupSummary(
   const aliasMap = new Map([...fullAliasMap.entries()].map(([uid, v]) => [uid, v.alias]))
 
   const historyText = formatChatHistory(messages, aliasMap)
-  const prompt = buildGroupCompressionPrompt(existingSummary, historyText)
+  const prompt = buildGroupCompressionPrompt(existingSummary, historyText, pinnedFacts)
 
-  const text = await generateWithFallback(prompt, config, deps)
+  const text = await deps.generateWithFallback(prompt, config)
 
   await deps.upsertGroupSummary(db, text)
   observerLog.withMetadata({ summaryLength: text.length }).info('Group summary compressed')
@@ -183,22 +171,126 @@ export async function compressUserSummaries(
   userIds: string[],
   config: Config,
   deps: ObserverDeps = defaultDeps,
+  pinnedFactsMap?: Map<string, string>,
 ): Promise<void> {
   observerLog.withMetadata({ userCount: userIds.length }).info('Compressing user summaries')
 
   for (const userId of userIds) {
     const messages = deps.getMessagesByUser(db, userId, config.OBSERVER_USER_MESSAGE_LIMIT)
     const existingSummary = await deps.getUserSummary(db, userId)
+    const pinnedFacts = pinnedFactsMap?.get(userId)
 
     const messagesText = messages.map(m => m.content).join('\n')
-    const prompt = buildUserCompressionPrompt(existingSummary, messagesText)
+    const prompt = buildUserCompressionPrompt(existingSummary, messagesText, pinnedFacts)
 
-    const text = await generateWithFallback(prompt, config, deps)
+    const text = await deps.generateWithFallback(prompt, config)
 
     await deps.upsertUserSummary(db, userId, text)
     observerLog.withMetadata({ userId, summaryLength: text.length }).debug('User summary compressed')
   }
   observerLog.withMetadata({ userCount: userIds.length }).info('All user summaries compressed')
+}
+
+/**
+ * 執行 facts 萃取階段，並在成功時推進 fact watermark 與更新向量索引。
+ *
+ * WHY：把「讀訊息 → 呼叫 LLM → 寫回 facts → 更新 watermark/embed」集中在單一 helper，
+ * 讓 runObserver 主流程保留高層步驟，降低認知負擔。
+ */
+async function runFactExtraction(
+  db: DB,
+  sqliteDb: Database,
+  config: Config,
+  deps: ObserverDeps,
+) {
+  // 在取訊息前先記錄時間戳，避免 extraction 執行期間新訊息被 watermark 跳過
+  const factExtractionStartTime = Date.now()
+  const factWatermark = deps.getFactWatermark(db)
+  const messagesSinceFactWatermark = deps.getMessagesSince(db, new Date(factWatermark))
+
+  // 首次執行（factWatermark=0）會載入全部歷史，限制筆數避免 prompt 過大
+  const nonBotMessages = messagesSinceFactWatermark
+    .filter(m => !m.isBot)
+    .slice(-200)
+
+  const allActiveFacts = deps.getAllActiveFacts(db)
+  const existingFacts = allActiveFacts
+    .filter((fact): fact is typeof fact & { scope: 'user' | 'group' } => fact.scope === 'user' || fact.scope === 'group')
+
+  try {
+    const allFactUserIds = [...new Set([
+      ...nonBotMessages.map(m => m.userId),
+      ...existingFacts.flatMap(f => f.userId !== null ? [f.userId] : []),
+    ])]
+    const aliasMap = await deps.getAliasMap(db, allFactUserIds)
+    const userMask = createUserMask(aliasMap)
+
+    const factMessages = nonBotMessages.map(m => ({
+      userId: userMask.mask(m.userId),
+      userName: aliasMap.get(m.userId)?.alias ?? aliasMap.get(m.userId)?.userName ?? m.userId,
+      content: m.content,
+      createdAt: m.timestamp,
+    }))
+
+    const maskedExistingFacts = existingFacts.map(f => ({
+      ...f,
+      userId: f.userId !== null ? userMask.mask(f.userId) : null,
+    }))
+
+    const results = await deps.extractFacts(factMessages, maskedExistingFacts, config, userMask)
+
+    for (const result of results) {
+      if (result.action === 'supersede' && result.targetFactId !== undefined)
+        deps.supersedeFact(db, result.targetFactId)
+
+      deps.upsertFact(db, {
+        scope: result.scope,
+        userId: result.userId ?? null,
+        canonicalKey: result.canonicalKey,
+        content: result.content,
+        confidence: result.confidence,
+      })
+    }
+
+    // 先推進 watermark 再處理 embedding——embedding 失敗不應阻擋 watermark 前進，
+    // 否則相同訊息會被重複萃取，導致 evidence_count 膨脹
+    deps.setFactWatermark(db, factExtractionStartTime)
+    await deps.processNewFactEmbeddings(sqliteDb, db, config)
+  }
+  catch (err) {
+    observerLog.withError(err instanceof Error ? err : new Error(String(err))).warn('Fact extraction failed, continuing with summary compression')
+  }
+
+  // NOTE: 回傳 extraction 前的 snapshot——新萃取的 facts 不在其中。
+  // 目前安全：新 facts 預設 pinned=false，不會影響 collectPinnedFacts。
+  // 若未來允許萃取時設定 pinned=true 或更新既有 pinned fact 的 content，
+  // 需改為在 extraction 後重新讀取。
+  return allActiveFacts
+}
+
+/**
+ * 收集 pinned facts，分為群組層級與使用者層級，供摘要壓縮 prompt 注入。
+ *
+ * WHY：一次在記憶體分組可避免 per-user N+1 查詢，也讓 pinned 組裝邏輯可獨立測讀。
+ */
+function collectPinnedFacts(
+  allActiveFacts: ReturnType<ObserverDeps['getAllActiveFacts']>,
+  userIds: string[],
+): { groupPinnedText: string | undefined, userPinnedTextMap: Map<string, string> } {
+  const allPinnedFacts = allActiveFacts.filter(f => f.pinned)
+  const groupPinnedText = allPinnedFacts
+    .filter(f => f.scope === 'group')
+    .map(f => f.content)
+    .join('\n') || undefined
+
+  const userPinnedTextMap = new Map<string, string>()
+  for (const userId of userIds) {
+    const userPinned = allPinnedFacts.filter(f => f.scope === 'user' && f.userId === userId)
+    if (userPinned.length > 0)
+      userPinnedTextMap.set(userId, userPinned.map(f => f.content).join('\n'))
+  }
+
+  return { groupPinnedText, userPinnedTextMap }
 }
 
 /**
@@ -212,9 +304,11 @@ export async function compressUserSummaries(
  */
 export async function runObserver(
   db: DB,
+  sqliteDb: Database,
   config: Config,
   deps: ObserverDeps = defaultDeps,
 ): Promise<void> {
+  // ── 1) 應否觸發 Observer ──
   if (!shouldRun(db, config)) {
     observerLog.debug('Observer skipped (threshold not met)')
     return
@@ -227,9 +321,15 @@ export async function runObserver(
   const watermark = getWatermark(db)
   const userIds = deps.getDistinctUserIds(db, watermark)
 
-  await compressGroupSummary(db, watermark, config, deps)
+  // ── 2) Facts 萃取 ──
+  const allActiveFacts = await runFactExtraction(db, sqliteDb, config, deps)
+
+  // ── 3) 收集 pinned facts，執行摘要壓縮 ──
+  const { groupPinnedText, userPinnedTextMap } = collectPinnedFacts(allActiveFacts, userIds)
+
+  await compressGroupSummary(db, watermark, config, deps, groupPinnedText)
 
   if (userIds.length > 0) {
-    await compressUserSummaries(db, watermark, userIds, config, deps)
+    await compressUserSummaries(db, watermark, userIds, config, deps, userPinnedTextMap)
   }
 }

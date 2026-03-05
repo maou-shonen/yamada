@@ -1,16 +1,27 @@
 import type { Database } from 'bun:sqlite'
 import type { Config } from '../config/index.ts'
 import type { ObserverDeps } from './observer'
-import { describe, expect, mock, test } from 'bun:test'
+import { describe, expect, test } from 'bun:test'
 import { createTestConfig } from '../__tests__/helpers/config.ts'
 import { setupTestDb } from '../__tests__/helpers/setup-db'
 import { getDistinctUserIds, getMessagesByUser, getMessagesSince } from '../storage/messages'
+import { buildGroupCompressionPrompt } from '../prompts/observer'
+import { processNewFactEmbeddings } from '../storage/embedding'
+import {
+  getAllActiveFacts,
+  getFactWatermark,
+  getPinnedFacts,
+  setFactWatermark,
+  supersedeFact,
+  upsertFact,
+} from '../storage/facts'
 import {
   getGroupSummary,
   getUserSummary,
   upsertGroupSummary,
   upsertUserSummary,
 } from '../storage/summaries'
+import { extractFacts } from './fact-extractor.ts'
 import {
   compressGroupSummary,
   compressUserSummaries,
@@ -56,15 +67,26 @@ function insertMessage(sqlite: Database, overrides: {
   )
 }
 
-function createFakeDeps() {
-  const generateTextMock = mock(() => Promise.resolve({ text: 'AI output' }))
+/** 建立可注入的假依賴，generateWithFallback 預設回傳固定文字 */
+function createFakeDeps(llmResponse = 'fake summary') {
+  const generateCalls: string[] = []
 
   const deps: ObserverDeps = {
-    generateText: generateTextMock as unknown as ObserverDeps['generateText'],
-    createModel: (modelName: string) => ({ model: modelName }) as unknown as ReturnType<ObserverDeps['createModel']>,
     getMessagesSince,
     getMessagesByUser,
     getDistinctUserIds,
+    extractFacts,
+    upsertFact,
+    supersedeFact,
+    getAllActiveFacts,
+    getPinnedFacts,
+    getFactWatermark,
+    setFactWatermark,
+    processNewFactEmbeddings,
+    generateWithFallback: async (prompt: string) => {
+      generateCalls.push(prompt)
+      return llmResponse
+    },
     getGroupSummary,
     upsertGroupSummary,
     getUserSummary,
@@ -72,10 +94,7 @@ function createFakeDeps() {
     getAliasMap: async () => new Map<string, { alias: string; userName: string }>(),
   }
 
-  return {
-    deps,
-    generateTextMock,
-  }
+  return { deps, generateCalls }
 }
 
 describe('shouldRun', () => {
@@ -160,19 +179,16 @@ describe('compressGroupSummary', () => {
     const { sqlite, db } = setupTestDb()
     const config = makeConfig()
     insertMessage(sqlite, { content: 'Hello world' })
-    const { deps, generateTextMock } = createFakeDeps()
-    generateTextMock.mockImplementation(() => Promise.resolve({ text: 'Group summary text' }))
+    const { deps, generateCalls } = createFakeDeps('compressed group summary')
 
     await compressGroupSummary(db, 0, config, deps)
 
-    expect(generateTextMock.mock.calls.length).toBe(1)
-
-    // 驗證 group summary 被儲存
-    const saved = await getGroupSummary(db)
-    expect(saved).toBe('Group summary text')
+    expect(generateCalls.length).toBe(1)
+    const stored = await getGroupSummary(db)
+    expect(stored).toBe('compressed group summary')
   })
 
-  test('增量壓縮：compressGroupSummary 只收到 watermark 之後的訊息', async () => {
+  test('增量壓縮：prompt 只包含 watermark 之後的訊息', async () => {
     const { sqlite, db } = setupTestDb()
     const config = makeConfig()
     // 插入舊訊息
@@ -187,43 +203,41 @@ describe('compressGroupSummary', () => {
     // 插入新訊息（在 watermark 之後）
     insertMessage(sqlite, { userId: 'u1', content: 'new msg 1', timestamp: watermarkTs + 1 })
     insertMessage(sqlite, { userId: 'u1', content: 'new msg 2', timestamp: watermarkTs + 2 })
-    
-    const { deps, generateTextMock } = createFakeDeps()
-    generateTextMock.mockImplementation(() => Promise.resolve({ text: 'Updated summary' }))
-    
+
+    const { deps, generateCalls } = createFakeDeps('incremental summary')
+
     await compressGroupSummary(db, watermarkTs, config, deps)
-    
-    // 驗證 generateText 被一作一次
-    expect(generateTextMock.mock.calls.length).toBe(1)
-    // 驗證傳入的 prompt 只包含新訊息（不包含舊訊息）
-    const callArgs = (generateTextMock.mock.calls as unknown as Array<[{ messages: Array<{ content: string }> }]>)[0]?.[0]
-    const promptContent = callArgs?.messages?.[0]?.content ?? ''
-    // 新訊息應該在 prompt 中
-    expect(promptContent).toContain('new msg 1')
-    expect(promptContent).toContain('new msg 2')
-    // 舊訊息不應該在 prompt 中（因為在 watermark 之前）
-    expect(promptContent).not.toContain('old msg 1')
-    expect(promptContent).not.toContain('old msg 2')
+
+    // prompt 應包含新訊息但不含舊訊息
+    expect(generateCalls.length).toBe(1)
+    expect(generateCalls[0]).toContain('new msg 1')
+    expect(generateCalls[0]).toContain('new msg 2')
+    expect(generateCalls[0]).not.toContain('old msg 1')
+    expect(generateCalls[0]).not.toContain('old msg 2')
   })
 })
 
 describe('compressUserSummaries', () => {
-  test('每個 user 各呼叫一次 AI', async () => {
+  test('每個 user 各呼叫一次 AI，摘要被正確儲存', async () => {
     const { sqlite, db } = setupTestDb()
     const config = makeConfig()
     insertMessage(sqlite, { userId: 'u1', content: 'msg from u1' })
     insertMessage(sqlite, { userId: 'u2', content: 'msg from u2' })
-    const { deps, generateTextMock } = createFakeDeps()
-    generateTextMock.mockImplementation(() => Promise.resolve({ text: 'User summary' }))
+
+    let callIndex = 0
+    const { deps } = createFakeDeps()
+    deps.generateWithFallback = async () => {
+      callIndex++
+      return `user summary ${callIndex}`
+    }
 
     await compressUserSummaries(db, 0, ['u1', 'u2'], config, deps)
 
-    expect(generateTextMock.mock.calls.length).toBe(2)
-
-    const s1 = await getUserSummary(db, 'u1')
-    const s2 = await getUserSummary(db, 'u2')
-    expect(s1).toBe('User summary')
-    expect(s2).toBe('User summary')
+    const u1Summary = await getUserSummary(db, 'u1')
+    const u2Summary = await getUserSummary(db, 'u2')
+    expect(u1Summary).toBe('user summary 1')
+    expect(u2Summary).toBe('user summary 2')
+    expect(callIndex).toBe(2)
   })
 })
 
@@ -231,61 +245,147 @@ describe('runObserver', () => {
   test('shouldRun false → AI 不被呼叫', async () => {
     const { sqlite, db } = setupTestDb()
     const config = makeConfig(10) // threshold = 10
-    const { deps, generateTextMock } = createFakeDeps()
+    const { deps, generateCalls } = createFakeDeps()
     // 只有 2 則訊息
     insertMessage(sqlite, { content: 'm1' })
     insertMessage(sqlite, { content: 'm2' })
 
-    await runObserver(db, config, deps)
+    await runObserver(db, sqlite, config, deps)
 
-    expect(generateTextMock.mock.calls.length).toBe(0)
+    expect(generateCalls.length).toBe(0)
   })
 
-  test('shouldRun true → 完整流程：group summary + user summaries', async () => {
+  test('shouldRun true → 完整流程：group summary + user summaries 皆被儲存', async () => {
     const { sqlite, db } = setupTestDb()
     const config = makeConfig(2) // threshold = 2
-    const { deps, generateTextMock } = createFakeDeps()
+    const { deps, generateCalls } = createFakeDeps()
+    // fact extraction 需要 mock，否則真正呼叫 extractFacts 會失敗
+    deps.extractFacts = (async () => []) as unknown as ObserverDeps['extractFacts']
+    deps.processNewFactEmbeddings = (async () => {}) as unknown as ObserverDeps['processNewFactEmbeddings']
+
     insertMessage(sqlite, { userId: 'u1', content: 'hello' })
     insertMessage(sqlite, { userId: 'u2', content: 'world' })
 
-    await runObserver(db, config, deps)
+    await runObserver(db, sqlite, config, deps)
 
-    // 1 次 group summary + 2 次 user summaries = 3 次
-    expect(generateTextMock.mock.calls.length).toBe(3)
-
-    const gs = await getGroupSummary(db)
-    const u1 = await getUserSummary(db, 'u1')
-    const u2 = await getUserSummary(db, 'u2')
-    expect(gs).toBe('AI output')
-    expect(u1).toBe('AI output')
-    expect(u2).toBe('AI output')
+    // 3 次 LLM 呼叫：1 group summary + 2 user summaries
+    expect(generateCalls.length).toBe(3)
+    const storedGroupSummary = await getGroupSummary(db)
+    expect(storedGroupSummary).toBe('fake summary')
+    const u1Summary = await getUserSummary(db, 'u1')
+    const u2Summary = await getUserSummary(db, 'u2')
+    expect(u1Summary).toBe('fake summary')
+    expect(u2Summary).toBe('fake summary')
   })
 
   test('Bot 訊息不被列入 user summaries', async () => {
     const { sqlite, db } = setupTestDb()
     const config = makeConfig(1)
-    const { deps, generateTextMock } = createFakeDeps()
+    const { deps, generateCalls } = createFakeDeps()
+    deps.extractFacts = (async () => []) as unknown as ObserverDeps['extractFacts']
+    deps.processNewFactEmbeddings = (async () => {}) as unknown as ObserverDeps['processNewFactEmbeddings']
+
     insertMessage(sqlite, { userId: 'u1', isBot: false, content: 'user msg' })
     insertMessage(sqlite, { userId: 'bot', isBot: true, content: 'bot msg' })
 
-    await runObserver(db, config, deps)
+    await runObserver(db, sqlite, config, deps)
 
-    // 1 group + 1 user (u1 only, bot excluded) = 2
-    expect(generateTextMock.mock.calls.length).toBe(2)
+    // 只有 u1 是非 bot，所以 2 次 LLM 呼叫：1 group + 1 user (u1)
+    expect(generateCalls.length).toBe(2)
+    const u1Summary = await getUserSummary(db, 'u1')
+    expect(u1Summary).toBe('fake summary')
+    // bot 不應該有摘要
+    const botSummary = await getUserSummary(db, 'bot')
+    expect(botSummary).toBeNull()
   })
 
   test('只有 bot 訊息達 threshold → userIds 為空 → 跳過 user summaries', async () => {
     const { sqlite, db } = setupTestDb()
     const config = makeConfig(2) // threshold = 2
-    const { deps, generateTextMock } = createFakeDeps()
+    const { deps, generateCalls } = createFakeDeps()
+    deps.extractFacts = (async () => []) as unknown as ObserverDeps['extractFacts']
+    deps.processNewFactEmbeddings = (async () => {}) as unknown as ObserverDeps['processNewFactEmbeddings']
+
     // 只插入 bot 訊息
     insertMessage(sqlite, { userId: 'bot', isBot: true, content: 'bot msg 1' })
     insertMessage(sqlite, { userId: 'bot', isBot: true, content: 'bot msg 2' })
-    
-    await runObserver(db, config, deps)
-    
-    // 應該只一次記文本一次（group summary），不一次記文本 user summaries
-    expect(generateTextMock.mock.calls.length).toBe(1)
+
+    await runObserver(db, sqlite, config, deps)
+
+    // 只有 1 次 group summary LLM 呼叫，無 user summaries
+    expect(generateCalls.length).toBe(1)
+  })
+})
+
+describe('fact extraction integration', () => {
+  test('runObserver: extractFacts 成功 → upsertFact 和 setFactWatermark 被呼叫', async () => {
+    const { sqlite, db } = setupTestDb()
+    const config = makeConfig(2) // threshold = 2
+    insertMessage(sqlite, { userId: 'u1', content: 'hello', isBot: false })
+    insertMessage(sqlite, { userId: 'u2', content: 'world', isBot: false })
+
+    let upsertFactCalled = false
+    let setFactWatermarkCalled = false
+
+    const { deps } = createFakeDeps()
+    const testDeps: ObserverDeps = {
+      ...deps,
+      extractFacts: (async () => [{
+        action: 'insert' as const,
+        scope: 'group' as const,
+        canonicalKey: 'test_fact',
+        content: 'test',
+        confidence: 0.9,
+      }]) as unknown as ObserverDeps['extractFacts'],
+      upsertFact: (...args) => {
+        upsertFactCalled = true
+        return upsertFact(...args)
+      },
+      setFactWatermark: (...args) => {
+        setFactWatermarkCalled = true
+        return setFactWatermark(...args)
+      },
+      processNewFactEmbeddings: (async () => {}) as unknown as ObserverDeps['processNewFactEmbeddings'],
+    }
+
+    await runObserver(db, sqlite, config, testDeps)
+
+    expect(upsertFactCalled).toBe(true)
+    expect(setFactWatermarkCalled).toBe(true)
   })
 
+  test('runObserver: extractFacts 拋錯不中斷摘要壓縮', async () => {
+    const { sqlite, db } = setupTestDb()
+    const config = makeConfig(2)
+    insertMessage(sqlite, { userId: 'u1', content: 'hello', isBot: false })
+    insertMessage(sqlite, { userId: 'u2', content: 'world', isBot: false })
+
+    let setFactWatermarkCalled = false
+
+    const { deps, generateCalls } = createFakeDeps()
+    const testDeps: ObserverDeps = {
+      ...deps,
+      extractFacts: (async () => { throw new Error('Fact extraction error') }) as unknown as ObserverDeps['extractFacts'],
+      setFactWatermark: (...args) => {
+        setFactWatermarkCalled = true
+        return setFactWatermark(...args)
+      },
+      processNewFactEmbeddings: (async () => {}) as unknown as ObserverDeps['processNewFactEmbeddings'],
+    }
+
+    await runObserver(db, sqlite, config, testDeps)
+
+    // extractFacts 拋錯 → try block 中的 setFactWatermark 不被呼叫
+    expect(setFactWatermarkCalled).toBe(false)
+    // compressGroupSummary + compressUserSummaries 仍被執行
+    expect(generateCalls.length).toBeGreaterThan(0)
+  })
+
+  test('compressGroupSummary 傳入 pinnedFacts → prompt 包含「不要重複」', () => {
+    // buildGroupCompressionPrompt 是 compressGroupSummary 內部使用的 prompt builder
+    // 直接驗證 prompt builder 輸出，確保 pinnedFacts 被正確注入
+    const prompt = buildGroupCompressionPrompt(null, 'some chat history', 'Alice 養了一隻貓')
+    expect(prompt).toContain('不要重複')
+    expect(prompt).toContain('Alice 養了一隻貓')
+  })
 })

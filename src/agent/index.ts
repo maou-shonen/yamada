@@ -291,7 +291,7 @@ export class Agent {
 
     // WHY fire-and-forget：記憶壓縮是 best-effort；失敗表示摘要過時但不影響當前回覆
     this.log.debug('Triggering Observer (background)...')
-    this.services.runObserver(this.db, this.config).catch((err) => {
+    this.services.runObserver(this.db, this.sqliteDb, this.config).catch((err) => {
       this.log.withError(err).error('Observer error')
     })
 

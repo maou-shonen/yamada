@@ -58,7 +58,7 @@ export function openGroupDb(dbDir: string, groupId: string): GroupDb {
  * 程式化初始化 schema。
  * 使用 CREATE TABLE IF NOT EXISTS，確保冪等性。
  */
-function initSchema(sqlite: Database): void {
+export function initSchema(sqlite: Database): void {
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS messages (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -144,6 +144,29 @@ function initSchema(sqlite: Database): void {
     )
   `)
   sqlite.exec(`CREATE UNIQUE INDEX IF NOT EXISTS user_aliases_alias_unique ON user_aliases(alias)`)
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS facts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      scope TEXT NOT NULL,
+      user_id TEXT,
+      canonical_key TEXT NOT NULL,
+      content TEXT NOT NULL,
+      confidence REAL NOT NULL DEFAULT 1.0,
+      evidence_count INTEGER NOT NULL DEFAULT 1,
+      status TEXT NOT NULL DEFAULT 'active',
+      pinned INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )
+  `)
+  sqlite.exec(`CREATE UNIQUE INDEX IF NOT EXISTS facts_canonical_key_unique ON facts(canonical_key, scope, COALESCE(user_id, '')) WHERE status = 'active'`)
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS facts_scope_user_status_idx ON facts(scope, user_id, status)`)
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS fact_metadata (
+      key TEXT PRIMARY KEY,
+      value INTEGER NOT NULL
+    )
+  `)
 }
 
 /**

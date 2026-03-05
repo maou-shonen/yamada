@@ -1,12 +1,50 @@
 /**
- * 純粹的 userId ↔ alias 文字替換工具函式。
+ * 純粹的 userId ↔ alias 轉換工具函式。
  * 無副作用、無 DB 存取、無外部依賴。
  *
- * 三個替換模式：
- * 1. `${userId}: ${content}` → `${alias}: ${content}` (buildChatMessages 格式)
- * 2. alias 在自由文本中的出現 → userName (observer 摘要中)
- * 3. `<@userId>` 和 `<@!userId>` → alias (Discord mention 清理)
+ * 兩個層級：
+ * - 值層級：UserMask — 單一值的 userId ↔ alias 雙向映射
+ * - 文字層級：replaceUserIdsWithAliases / replaceAliasesWithNames / sanitizeDiscordMentions
  */
+
+// ── 值層級：雙向掩碼映射 ──
+
+/**
+ * 雙向 userId ↔ alias 掩碼映射。
+ *
+ * 設計：LLM 只看到 alias，永遠不看到原始平台 ID。
+ * mask = userId → alias（送入 LLM 前）
+ * unmask = alias → userId（從 LLM 結果取回後）
+ */
+export interface UserMask {
+  /** 將原始 userId 轉為 alias。找不到則回傳原值。 */
+  mask: (userId: string) => string
+  /** 將 alias 轉回原始 userId。找不到則回傳原值。 */
+  unmask: (alias: string) => string
+}
+
+export function createUserMask(
+  aliasMap: Map<string, { alias: string, userName: string }>,
+): UserMask {
+  const userIdToAlias = new Map<string, string>()
+  const aliasToUserId = new Map<string, string>()
+
+  for (const [userId, value] of aliasMap.entries()) {
+    userIdToAlias.set(userId, value.alias)
+    aliasToUserId.set(value.alias, userId)
+  }
+
+  return {
+    mask(userId: string): string {
+      return userIdToAlias.get(userId) ?? userId
+    },
+    unmask(alias: string): string {
+      return aliasToUserId.get(alias) ?? alias
+    },
+  }
+}
+
+// ── 文字層級：字串替換 ──
 
 /**
  * 替換 `{userId}: ` 前綴模式為 `{alias}: `。
