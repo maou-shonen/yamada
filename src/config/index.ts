@@ -19,8 +19,8 @@ const configSchema = z.object({
 
   /** Bot 人格 system prompt */
   SOUL: z.string().min(1).default(DEFAULT_SOUL),
-  /** 群組 SQLite 資料庫目錄路徑，每個群組一個 {groupId}.db 檔案 */
-  DB_DIR: z.string().default('./data/groups/'),
+  /** 單一 SQLite 資料庫檔案路徑 */
+  DB_PATH: z.string().default('./data/yamada.db'),
   /** Discord groupId 取用模式：'guild' = 同 server 共用 / 'channel' = 每頻道獨立 */
   DISCORD_GROUP_ID_MODE: z.enum(['guild', 'channel']).default('guild'),
   /** LINE Webhook 監聽埠 */

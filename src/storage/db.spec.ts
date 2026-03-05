@@ -1,31 +1,48 @@
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { rmSync } from 'node:fs'
 import { afterEach, describe, expect, test } from 'bun:test'
-import { GroupDbManager, openGroupDb } from './db'
+import { eq } from 'drizzle-orm'
+import { closeDb, openDb } from './db'
 import { messages } from './schema'
 
-const TEST_DB_DIR = `/tmp/test-db-${Date.now()}`
+const TEST_DB_PATH = join(tmpdir(), `test-yamada-${Date.now()}.db`)
 const TEST_DIMENSIONS = 4
 
 afterEach(() => {
-  try {
-    rmSync(TEST_DB_DIR, { recursive: true, force: true })
-  }
-  catch {}
+  try { rmSync(TEST_DB_PATH, { force: true }) } catch {}
+  try { rmSync(`${TEST_DB_PATH}-wal`, { force: true }) } catch {}
+  try { rmSync(`${TEST_DB_PATH}-shm`, { force: true }) } catch {}
 })
 
-describe('openGroupDb', () => {
+describe('openDb', () => {
   test('建立 DB 並初始化 schema', () => {
-    const { db, sqlite } = openGroupDb(TEST_DB_DIR, 'group-a', TEST_DIMENSIONS)
-    expect(db).toBeDefined()
-    expect(sqlite).toBeDefined()
-    sqlite.close()
+    const appDb = openDb(TEST_DB_PATH, TEST_DIMENSIONS)
+    expect(appDb.db).toBeDefined()
+    expect(appDb.sqlite).toBeDefined()
+    closeDb(appDb)
   })
 
-  test('insert + query messages', async () => {
-    const { db, sqlite } = openGroupDb(TEST_DB_DIR, 'group-a', TEST_DIMENSIONS)
+  test('WAL mode 啟用', () => {
+    const appDb = openDb(TEST_DB_PATH, TEST_DIMENSIONS)
+    const result = appDb.sqlite.query('PRAGMA journal_mode').get() as { journal_mode: string }
+    expect(result.journal_mode).toBe('wal')
+    closeDb(appDb)
+  })
+
+  test('busy_timeout 設定為 10000', () => {
+    const appDb = openDb(TEST_DB_PATH, TEST_DIMENSIONS)
+    const result = appDb.sqlite.query('PRAGMA busy_timeout').get() as { timeout: number }
+    expect(result.timeout).toBe(10000)
+    closeDb(appDb)
+  })
+
+  test('insert + query messages with groupId', async () => {
+    const appDb = openDb(TEST_DB_PATH, TEST_DIMENSIONS)
     const now = Date.now()
 
-    await db.insert(messages).values({
+    await appDb.db.insert(messages).values({
+      groupId: 'group-a',
       externalId: 'msg-1',
       userId: 'user-1',
       content: 'Hello world',
@@ -33,37 +50,19 @@ describe('openGroupDb', () => {
       timestamp: now,
     })
 
-    const result = await db.select().from(messages)
+    const result = await appDb.db.select().from(messages)
     expect(result).toHaveLength(1)
     expect(result[0].content).toBe('Hello world')
-    sqlite.close()
-  })
-})
-
-describe('GroupDbManager', () => {
-  test('getOrCreate 回傳相同實例', () => {
-    const manager = new GroupDbManager(TEST_DB_DIR, TEST_DIMENSIONS)
-    const db1 = manager.getOrCreate('group-a')
-    const db2 = manager.getOrCreate('group-a')
-    expect(db1).toBe(db2)
-    manager.closeAll()
+    expect(result[0].groupId).toBe('group-a')
+    closeDb(appDb)
   })
 
-  test('不同 groupId 回傳不同實例', () => {
-    const manager = new GroupDbManager(TEST_DB_DIR, TEST_DIMENSIONS)
-    const dbA = manager.getOrCreate('group-a')
-    const dbB = manager.getOrCreate('group-b')
-    expect(dbA).not.toBe(dbB)
-    manager.closeAll()
-  })
-
-  test('per-group 隔離：group-a 的資料在 group-b 不可見', async () => {
-    const manager = new GroupDbManager(TEST_DB_DIR, TEST_DIMENSIONS)
-    const { db: dbA } = manager.getOrCreate('group-a')
-    const { db: dbB } = manager.getOrCreate('group-b')
+  test('cross-group isolation via groupId filter', async () => {
+    const appDb = openDb(TEST_DB_PATH, TEST_DIMENSIONS)
     const now = Date.now()
 
-    await dbA.insert(messages).values({
+    await appDb.db.insert(messages).values({
+      groupId: 'group-a',
       externalId: 'msg-a',
       userId: 'user-1',
       content: 'Message in group A',
@@ -71,19 +70,22 @@ describe('GroupDbManager', () => {
       timestamp: now,
     })
 
-    const groupAMessages = await dbA.select().from(messages)
-    const groupBMessages = await dbB.select().from(messages)
+    const groupAMessages = await appDb.db.select().from(messages).where(eq(messages.groupId, 'group-a'))
+    const groupBMessages = await appDb.db.select().from(messages).where(eq(messages.groupId, 'group-b'))
 
     expect(groupAMessages).toHaveLength(1)
     expect(groupBMessages).toHaveLength(0)
-
-    manager.closeAll()
+    closeDb(appDb)
   })
+})
 
-  test('closeAll 關閉所有連線', () => {
-    const manager = new GroupDbManager(TEST_DB_DIR, TEST_DIMENSIONS)
-    manager.getOrCreate('group-a')
-    manager.getOrCreate('group-b')
-    expect(() => manager.closeAll()).not.toThrow()
+describe('closeDb', () => {
+  test('關閉後 query 應拋出錯誤', () => {
+    const appDb = openDb(TEST_DB_PATH, TEST_DIMENSIONS)
+    closeDb(appDb)
+
+    expect(() => {
+      appDb.sqlite.query('SELECT 1').get()
+    }).toThrow()
   })
 })

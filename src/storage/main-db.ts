@@ -1,3 +1,7 @@
+// @deprecated — use openDb() / closeDb() from ./db instead.
+// This file is kept for backward compatibility during migration.
+// T16 will clean up all remaining imports.
+
 import type { BunSQLiteDatabase } from 'drizzle-orm/bun-sqlite'
 import { Database } from 'bun:sqlite'
 import { drizzle } from 'drizzle-orm/bun-sqlite'
@@ -14,14 +18,7 @@ export interface MainDbConnection {
 const dbLog = log.withPrefix('[MainDB]')
 
 /**
- * 開啟（或建立）全域 main.db SQLite 連線。
- *
- * - 設定 WAL mode 提升並發讀寫效能
- * - 設定 busy_timeout = 10000ms（比 per-group 的 5000ms 更高）
- * - 程式化初始化 pending_triggers table（冪等）
- *
- * @param dbPath - main.db 檔案路徑
- * @returns { db, sqlite } 物件
+ * @deprecated Use `openDb()` from `./db` instead.
  */
 export function openMainDb(dbPath: string): MainDbConnection {
   dbLog.withMetadata({ dbPath }).info('Opening main SQLite database')
@@ -34,23 +31,15 @@ export function openMainDb(dbPath: string): MainDbConnection {
     throw new Error(`Failed to open main database at "${dbPath}" — check file permissions and disk space`, { cause: error })
   }
 
-  // WAL mode 提升並發讀寫效能
   sqlite.exec('PRAGMA journal_mode = WAL')
-  // 防止背景排程器與主 pipeline 發生 SQLITE_BUSY
-  // 比 per-group 的 5000ms 更高，因為 main.db 是全域共享資源
   sqlite.exec('PRAGMA busy_timeout = 10000')
 
-  // 程式化初始化 schema（不依賴 Drizzle migration 檔案）
   initMainSchema(sqlite)
 
   const db = drizzle(sqlite, { schema: mainSchema })
   return { db, sqlite }
 }
 
-/**
- * 程式化初始化 main.db schema。
- * 使用 CREATE TABLE IF NOT EXISTS，確保冪等性。
- */
 function initMainSchema(sqlite: Database): void {
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS pending_triggers (
@@ -77,16 +66,12 @@ function initMainSchema(sqlite: Database): void {
 }
 
 /**
- * 關閉 main.db 連線。
- *
- * - 執行 WAL checkpoint(TRUNCATE) 確保所有變更已寫入主檔案
- * - 關閉連線，確保 Docker 重啟後新容器從乾淨 DB 啟動
- *
- * @param sqlite - Database 實例
+ * @deprecated Use `closeDb()` from `./db` instead.
+ * Note: This function still performs WAL checkpoint for backward compatibility.
+ * The new `closeDb()` does NOT checkpoint (Litestream compatibility).
  */
 export function closeMainDb(sqlite: Database): void {
   try {
-    // WAL checkpoint(TRUNCATE) 確保所有變更已寫入主檔案
     sqlite.exec('PRAGMA wal_checkpoint(TRUNCATE)')
   }
   catch (error) {

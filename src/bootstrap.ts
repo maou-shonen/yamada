@@ -49,7 +49,7 @@ export interface BootstrapOptions {
  * 關閉順序：channels → scheduler → agents → main.db → per-group DBs
  */
 export async function bootstrap(config: Config, options?: BootstrapOptions): Promise<AppContext> {
-  const dbDir = options?.dbDir ?? config.DB_DIR
+  const dbDir = options?.dbDir ?? config.DB_PATH
   log.withMetadata({ dbDir }).info('Initializing GroupDbManager...')
   const manager = new GroupDbManager(dbDir, config.EMBEDDING_DIMENSIONS)
 

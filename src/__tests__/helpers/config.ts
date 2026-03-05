@@ -11,7 +11,7 @@ export function createTestConfig(overrides: Partial<Config> = {}): Config {
 
     // ── 人格與基本設定 ──
     SOUL: 'test soul',
-    DB_DIR: '/tmp/test-groups/',
+    DB_PATH: '/tmp/test-groups/',
     DISCORD_GROUP_ID_MODE: 'guild',
     LINE_WEBHOOK_PORT: 3000,
     HEALTH_PORT: 3000,
