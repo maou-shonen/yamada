@@ -91,25 +91,25 @@ docker compose up      # 啟動（首次會自動 build）
 
 ### 秘密憑證
 
-| 變數                        | 必要 | 說明                                                       |
-| --------------------------- | ---- | ---------------------------------------------------------- |
-| `DISCORD_TOKEN`             | ⚡   | Discord Bot Token                                          |
-| `DISCORD_CLIENT_ID`         | ⚡   | Discord Application ID                                     |
-| `LINE_CHANNEL_SECRET`       | ⚡   | LINE Channel Secret                                        |
-| `LINE_CHANNEL_ACCESS_TOKEN` | ⚡   | LINE Channel Access Token                                  |
-| `OPENAI_API_KEY`            |      | OpenAI API Key（不設定則 SDK 自動讀取 env var）            |
-| `OPENAI_BASE_URL`           |      | OpenAI 自訂端點（不設定則使用官方預設）                    |
-| `ANTHROPIC_API_KEY`         |      | Anthropic API Key（不設定則 SDK 自動讀取 env var）         |
-| `ANTHROPIC_BASE_URL`        |      | Anthropic 自訂端點（不設定則使用官方預設）                 |
-| `GOOGLE_API_KEY`            |      | Google AI Studio API Key（不設定則 SDK 自動讀取 env var）  |
-| `GOOGLE_BASE_URL`           |      | Google AI Studio 自訂端點（不設定則使用官方預設）          |
-| `OPENROUTER_API_KEY`        |      | OpenRouter API Key                                         |
-| `OPENROUTER_BASE_URL`       |      | OpenRouter 自訂端點（預設 `https://openrouter.ai/api/v1`） |
-| `OPENCODE_API_KEY`          |      | OpenCode API Key                                           |
-| `OPENCODE_BASE_URL`         |      | OpenCode 自訂端點（預設 `https://opencode.ai/zen/v1`）     |
+| 變數                        | 必要 | 說明                                                                         |
+| --------------------------- | ---- | ---------------------------------------------------------------------------- |
+| `DISCORD_TOKEN`             | ⚡   | Discord Bot Token                                                            |
+| `DISCORD_CLIENT_ID`         | ⚡   | Discord Application ID                                                       |
+| `LINE_CHANNEL_SECRET`       | ⚡   | LINE Channel Secret                                                          |
+| `LINE_CHANNEL_ACCESS_TOKEN` | ⚡   | LINE Channel Access Token                                                    |
+| `OPENAI_API_KEY`            |      | OpenAI API Key（不設定則 SDK 自動讀取 env var）                              |
+| `OPENAI_BASE_URL`           |      | OpenAI 自訂端點（不設定則使用官方預設）                                      |
+| `ANTHROPIC_API_KEY`         |      | Anthropic API Key（不設定則 SDK 自動讀取 env var）                           |
+| `ANTHROPIC_BASE_URL`        |      | Anthropic 自訂端點（不設定則使用官方預設）                                   |
+| `GOOGLE_API_KEY`            |      | Google AI Studio API Key（不設定則 SDK 自動讀取 env var）                    |
+| `GOOGLE_BASE_URL`           |      | Google AI Studio 自訂端點（不設定則使用官方預設）                            |
+| `OPENROUTER_API_KEY`        |      | OpenRouter API Key                                                           |
+| `OPENROUTER_BASE_URL`       |      | OpenRouter 自訂端點（預設 `https://openrouter.ai/api/v1`）                   |
+| `OPENCODE_API_KEY`          |      | OpenCode API Key                                                             |
+| `OPENCODE_BASE_URL`         |      | OpenCode 自訂端點（預設 `https://opencode.ai/zen/v1`）                       |
 | `OPENCODE_COMPATIBLE`       |      | OpenCode compatible mode（`openai` / `anthropic` / `gemini`，預設 `openai`） |
-| `TUNNEL_TOKEN`              |      | Cloudflare Tunnel Token（Docker Compose 用）               |
-| `TUNNEL_TOKEN`              |      | Cloudflare Tunnel Token（Docker Compose 用）               |
+| `TUNNEL_TOKEN`              |      | Cloudflare Tunnel Token（Docker Compose 用）                                 |
+| `TUNNEL_TOKEN`              |      | Cloudflare Tunnel Token（Docker Compose 用）                                 |
 
 ### 人格與基本設定
 
@@ -132,13 +132,13 @@ docker compose up      # 啟動（首次會自動 build）
 
 **支援的 provider 與 API 設定：**
 
-| Provider       | 預設端點                       | 設定欄位                                     |
-| -------------- | ------------------------------ | -------------------------------------------- |
-| `openai`       | OpenAI 官方                    | `OPENAI_API_KEY` / `OPENAI_BASE_URL`         |
-| `anthropic`    | Anthropic 官方                 | `ANTHROPIC_API_KEY` / `ANTHROPIC_BASE_URL`   |
-| `google`       | Google AI Studio               | `GOOGLE_API_KEY` / `GOOGLE_BASE_URL`         |
-| `openrouter`   | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` / `OPENROUTER_BASE_URL` |
-| `opencode` | `https://opencode.ai/zen/v1`   | `OPENCODE_API_KEY` / `OPENCODE_BASE_URL` / `OPENCODE_COMPATIBLE` |
+| Provider     | 預設端點                       | 設定欄位                                                         |
+| ------------ | ------------------------------ | ---------------------------------------------------------------- |
+| `openai`     | OpenAI 官方                    | `OPENAI_API_KEY` / `OPENAI_BASE_URL`                             |
+| `anthropic`  | Anthropic 官方                 | `ANTHROPIC_API_KEY` / `ANTHROPIC_BASE_URL`                       |
+| `google`     | Google AI Studio               | `GOOGLE_API_KEY` / `GOOGLE_BASE_URL`                             |
+| `openrouter` | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` / `OPENROUTER_BASE_URL`                     |
+| `opencode`   | `https://opencode.ai/zen/v1`   | `OPENCODE_API_KEY` / `OPENCODE_BASE_URL` / `OPENCODE_COMPATIBLE` |
 
 ### Embedding
 
