@@ -1,5 +1,5 @@
 import type { DB } from './db'
-import { and, count, eq, gt, sql } from 'drizzle-orm'
+import { and, count, eq, gt } from 'drizzle-orm'
 import * as schema from './schema'
 
 /**

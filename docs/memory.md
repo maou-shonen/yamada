@@ -225,23 +225,25 @@ context.ts → <related_history> 區塊
 早期架構使用每個群組獨立 DB 檔案（`data/groups/{groupId}.db`），後遷移至單一統一 DB（`data/yamada.db`）。
 
 遷移原因：
+
 - 簡化部署與備份（Litestream 單一檔案 WAL 備份）
 - 減少大量小檔案對檔案系統的壓力
 - 統一的 schema 管理與連線池
 
 隔離方式：
+
 - 所有表都包含 `group_id TEXT NOT NULL` 欄位
 - 所有查詢都帶 `group_id` 條件
 - 索引皆為複合索引（`group_id, ...`）確保查詢效率
 
 ## 風險評估
 
-| 風險                              | 嚴重度 | 緩解措施                                                     |
-| --------------------------------- | ------ | ------------------------------------------------------------ |
-| 單一 DB 檔案過大                  | 中     | 預估 100 群組 × 1 年 = 300-400 GB，需監控並規劃歸檔策略      |
-| WAL 檔案增長                      | 低     | Litestream 持續備份 WAL，自動 checkpoint                     |
-| Schema 變更影響所有群組           | 低     | 程式化 init 用 IF NOT EXISTS / ALTER TABLE IF NOT EXISTS     |
-| 備份一致性                        | 低     | Litestream 提供 point-in-time recovery                       |
+| 風險                    | 嚴重度 | 緩解措施                                                 |
+| ----------------------- | ------ | -------------------------------------------------------- |
+| 單一 DB 檔案過大        | 中     | 預估 100 群組 × 1 年 = 300-400 GB，需監控並規劃歸檔策略  |
+| WAL 檔案增長            | 低     | Litestream 持續備份 WAL，自動 checkpoint                 |
+| Schema 變更影響所有群組 | 低     | 程式化 init 用 IF NOT EXISTS / ALTER TABLE IF NOT EXISTS |
+| 備份一致性              | 低     | Litestream 提供 point-in-time recovery                   |
 
 ## 附錄：Agent 框架記憶架構參考
 
