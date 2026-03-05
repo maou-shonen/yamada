@@ -83,6 +83,10 @@ cp .env.example .env   # 編輯填入 token（含 TUNNEL_TOKEN）
 docker compose up      # 啟動（首次會自動 build）
 ```
 
+#### 備份（Litestream）
+
+生產環境使用 Litestream 進行 WAL-based 串流備份。設定 `LITESTREAM_*` 環境變數後，Docker 容器會自動啟用備份。詳見 `litestream.yml`。
+
 ## 環境變數
 
 所有設定皆透過環境變數（`.env`）提供，由 Zod schema 驗證並填入預設值。
@@ -113,12 +117,12 @@ docker compose up      # 啟動（首次會自動 build）
 
 ### 人格與基本設定
 
-| 變數                    | 預設值           | 說明                                                     |
-| ----------------------- | ---------------- | -------------------------------------------------------- |
-| `SOUL`                  | （內建人格）     | Bot 人格 system prompt                                   |
-| `DB_DIR`                | `./data/groups/` | 群組 SQLite 資料庫目錄，每個群組一個 `{groupId}.db` 檔案 |
-| `DISCORD_GROUP_ID_MODE` | `guild`          | `guild` = 同 server 共用 / `channel` = 每頻道獨立        |
-| `LINE_WEBHOOK_PORT`     | `3000`           | LINE Webhook 監聽埠                                      |
+| 變數                    | 預設值             | 說明                                              |
+| ----------------------- | ------------------ | ------------------------------------------------- |
+| `SOUL`                  | （內建人格）       | Bot 人格 system prompt                            |
+| `DB_PATH`               | `./data/yamada.db` | SQLite 資料庫檔案路徑（所有群組共用）             |
+| `DISCORD_GROUP_ID_MODE` | `guild`            | `guild` = 同 server 共用 / `channel` = 每頻道獨立 |
+| `LINE_WEBHOOK_PORT`     | `3000`             | LINE Webhook 監聽埠                               |
 
 ### AI 模型
 

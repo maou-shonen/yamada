@@ -1,31 +1,20 @@
-# 記憶架構：Per-Group SQLite
+# 記憶架構：Unified SQLite
 
 ## 設計決策
 
 ### 核心原則
 
-- **每個群組 = 獨立 agent 生命週期**：每個群組擁有自己的 SQLite 檔案，包含 messages、summaries、vectors
+- **Single unified DB**：所有群組資料存於同一 SQLite 檔案，以 `group_id` 欄位邏輯隔離
 - **訊息無限期保留**：不刪除、不 GC、不 TTL
 - **Chunk-based embedding**：訊息依 reply chain 分組後 embed（成本更低、語義更完整）
-- **共用設定全靠 env/config**：不需要共用 DB，只有 SOUL（人格 prompt）跨群組共用
-
-### 為什麼 Per-Group？
-
-| 面向          | 單一共用 DB               | Per-Group DB           |
-| ------------- | ------------------------- | ---------------------- |
-| 隔離性        | 邏輯隔離（group_id 欄位） | 物理隔離（獨立檔案）   |
-| 群組間影響    | 共用 WAL、共用 lock       | 完全獨立               |
-| 單群組資料量  | 36.5M 則（100 群組合計）  | 36.5 萬則/年（單群組） |
-| 向量儲存      | ~210 GB/年（合計）        | ~2.1 GB/年（單群組）   |
-| 備份/刪除群組 | 需 SQL 過濾               | 直接複製/刪除檔案      |
-| Schema 簡潔度 | 每張表都需 group_id       | 不需要 group_id        |
+- **共用設定全靠 env/config**：只有 SOUL（人格 prompt）跨群組共用
 
 ### 規模評估
 
-- 每群組 1000 則/天 × 365 天 = **36.5 萬則/年** — SQLite 毫無壓力
-- 每群組向量 36.5 萬 × 1536 dim × 4 bytes ≈ **2.1 GB/年** — 可接受
-- 每群組 DB 檔案 ≈ **3-4 GB/年**（含訊息 + 摘要 + 向量）
-- 100 群組 = 100 個獨立 DB 檔案，totaling ~300-400 GB/年
+- 每群組 1000 則/天 × 365 天 = **36.5 萬則/年**
+- 100 群組 × 36.5 萬 = **3650 萬則/年** — SQLite 在 WAL 模式下可處理
+- 向量儲存：3650 萬 × 1536 dim × 4 bytes ≈ **210 GB/年** — 需監控，但單檔案可行
+- 單一 DB 檔案 ≈ **300-400 GB/年**（含訊息 + 摘要 + 向量）— 需搭配 Litestream 備份
 
 ### Embedding 策略比較
 
@@ -43,6 +32,7 @@
 ```sql
 CREATE TABLE messages (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  group_id TEXT NOT NULL,
   external_id TEXT,
   user_id TEXT NOT NULL,
   content TEXT NOT NULL,
@@ -50,14 +40,14 @@ CREATE TABLE messages (
   timestamp INTEGER NOT NULL,
   reply_to_external_id TEXT
 );
-CREATE INDEX messages_timestamp_idx ON messages(timestamp);
-CREATE INDEX messages_external_id_idx ON messages(external_id);
+CREATE INDEX messages_timestamp_idx ON messages(group_id, timestamp);
+CREATE INDEX messages_external_id_idx ON messages(group_id, external_id);
 ```
 
 - `id`：INTEGER PRIMARY KEY AUTOINCREMENT — SQLite 自動分配，同時作為 sqlite-vec 的 rowid（消除橋接表）
+- `group_id`：群組 ID，用於邏輯隔離不同群組的資料
 - `external_id`：平台訊息 ID（Discord snowflake / LINE message ID），bot 訊息為 null
-- 不需要 `group_id`：per-group DB 本身就是隔離單位
-- 不需要 `platform`：per-group DB 天然對應單一平台
+- 不需要 `platform`：群組 ID 已隱含平台資訊
 - 不需要 `created_at`：`timestamp` 已涵蓋所有時間查詢需求
 - `reply_to_external_id`：回覆目標的平台訊息 ID（Discord/LINE），用於 chunking 時追溯 reply chain
 
@@ -66,12 +56,13 @@ CREATE INDEX messages_external_id_idx ON messages(external_id);
 ```sql
 CREATE TABLE chunks (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  group_id TEXT NOT NULL,
   content TEXT NOT NULL,
   message_ids TEXT NOT NULL,
   start_timestamp INTEGER NOT NULL,
   end_timestamp INTEGER NOT NULL
 );
-CREATE INDEX chunks_end_timestamp_idx ON chunks(end_timestamp);
+CREATE INDEX chunks_end_timestamp_idx ON chunks(group_id, end_timestamp);
 ```
 
 - `content`：chunk 的文字內容（多則訊息合併，格式 `{userId}: {content}`）
@@ -84,10 +75,11 @@ CREATE INDEX chunks_end_timestamp_idx ON chunks(end_timestamp);
 ```sql
 CREATE TABLE user_summaries (
   id TEXT PRIMARY KEY,
+  group_id TEXT NOT NULL,
   user_id TEXT NOT NULL,
   summary TEXT NOT NULL,
   updated_at INTEGER NOT NULL,
-  UNIQUE(user_id)
+  UNIQUE(group_id, user_id)
 );
 ```
 
@@ -95,13 +87,13 @@ CREATE TABLE user_summaries (
 
 ```sql
 CREATE TABLE group_summaries (
-  id TEXT PRIMARY KEY,
+  group_id TEXT PRIMARY KEY,
   summary TEXT NOT NULL,
   updated_at INTEGER NOT NULL
 );
 ```
 
-- Per-group DB 中只有一筆記錄，`id` 固定為 `'singleton'`
+- `group_id` 為主鍵，每個群組一筆記錄
 - `updated_at` 同時作為 Observer 的 watermark（計算「距上次壓縮以來的訊息數」）
 
 ### chunk_vectors（sqlite-vec 虛擬表）
@@ -121,6 +113,7 @@ CREATE VIRTUAL TABLE chunk_vectors USING vec0(
 ```sql
 CREATE TABLE facts (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  group_id TEXT NOT NULL,
   scope TEXT NOT NULL,
   user_id TEXT,
   canonical_key TEXT NOT NULL,
@@ -132,8 +125,8 @@ CREATE TABLE facts (
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
-CREATE UNIQUE INDEX facts_canonical_key_unique ON facts(canonical_key, scope, COALESCE(user_id, '')) WHERE status = 'active';
-CREATE INDEX facts_scope_user_status_idx ON facts(scope, user_id, status);
+CREATE UNIQUE INDEX facts_canonical_key_unique ON facts(group_id, canonical_key, scope, COALESCE(user_id, '')) WHERE status = 'active';
+CREATE INDEX facts_scope_user_status_idx ON facts(group_id, scope, user_id, status);
 ```
 
 - `scope`：`'user'`（個人事實）或 `'group'`（群組事實）
@@ -149,12 +142,14 @@ CREATE INDEX facts_scope_user_status_idx ON facts(scope, user_id, status);
 
 ```sql
 CREATE TABLE fact_metadata (
-  key TEXT PRIMARY KEY,
-  value INTEGER NOT NULL
+  group_id TEXT NOT NULL,
+  key TEXT NOT NULL,
+  value INTEGER NOT NULL,
+  PRIMARY KEY (group_id, key)
 );
 ```
 
-- Singleton key-value store，目前唯一用途是儲存 fact watermark
+- Per-group key-value store，目前唯一用途是儲存 fact watermark
 - `key = 'fact_watermark'`，`value` = 上次 fact extraction 完成的 Unix ms 時間戳
 - Watermark 與 summary watermark（`group_summaries.updated_at`）完全獨立，避免兩者之間的原子性問題
 
@@ -202,50 +197,51 @@ Token 超出預算時，按優先序裁剪——搜尋到的 facts 先裁、pinn
 ## DB 檔案結構
 
 ```
-data/groups/
-├── {groupId_1}.db     # 群組 1 的所有資料
-├── {groupId_2}.db     # 群組 2 的所有資料
-└── ...
+data/
+└── yamada.db          # 所有群組的資料（以 group_id 邏輯隔離）
 ```
 
-### GroupDbManager
+### openDb / closeDb
 
-- `GroupDbManager` 管理所有群組 DB 連線，內部 `Map<string, GroupDb>` 快取
-- `getOrCreate(groupId)` — lazy init，首次存取時建立 DB 並執行 schema init
-- `closeAll()` — graceful shutdown 時關閉所有連線
+- `openDb(dbPath, dimensions)` — 開啟（或建立）SQLite DB，初始化 schema + sqlite-vec 擴充
+- `closeDb(appDb)` — 關閉 DB 連線（注意：不執行 WAL checkpoint，由 Litestream 接管 WAL 管理）
+- 回傳 `AppDb = { db, sqlite }` 供應用程式使用
 
 ### 向量搜尋流程
 
 ```
 messages → buildChunks() → ChunkInput[]
-saveChunk(db, chunk) → chunks.id (INTEGER PK) → 直接作為 sqlite-vec rowid
+saveChunk(db, groupId, chunk) → chunks.id (INTEGER PK) → 直接作為 sqlite-vec rowid
 insertChunkVector(db, chunkId, embedding) → INSERT（手動冪等）
-searchSimilarChunks(db, queryEmbedding, topK, threshold) → { chunkId, distance }[]
+searchSimilarChunks(db, groupId, queryEmbedding, topK, threshold) → { chunkId, distance }[]
 getChunkContents(db, chunkIds) → string[]（chunk 文字內容）
 context.ts → <related_history> 區塊
 ```
 
-## 資料遷移
+## 設計演進
 
-從舊的單一共用 DB 遷移到 per-group DB：
+### 從 Per-Group DB 遷移到 Single DB
 
-```bash
-bun run scripts/migrate-to-per-group.ts <舊-db-路徑> [目標目錄]
+早期架構使用每個群組獨立 DB 檔案（`data/groups/{groupId}.db`），後遷移至單一統一 DB（`data/yamada.db`）。
 
-# 範例
-bun run scripts/migrate-to-per-group.ts ./data/yamada.db ./data/groups/
-```
+遷移原因：
+- 簡化部署與備份（Litestream 單一檔案 WAL 備份）
+- 減少大量小檔案對檔案系統的壓力
+- 統一的 schema 管理與連線池
 
-- 自動按 `group_id` 拆分 messages、summaries 到各 per-group DB
-- 向量索引不遷移，程式啟動後會自動為新訊息建立 embedding
+隔離方式：
+- 所有表都包含 `group_id TEXT NOT NULL` 欄位
+- 所有查詢都帶 `group_id` 條件
+- 索引皆為複合索引（`group_id, ...`）確保查詢效率
 
 ## 風險評估
 
-| 風險                                   | 嚴重度 | 緩解措施                                                        |
-| -------------------------------------- | ------ | --------------------------------------------------------------- |
-| sqlite-vec 不支援 per-DB 初始化        | 低     | 已確認 sqlite-vec 是 per-connection extension，每個 DB 獨立載入 |
-| 大量 DB 檔案的 OS file descriptor 限制 | 低     | 100 個 DB = 100 fd，遠低於預設 ulimit                           |
-| Schema 變更需遍歷所有 DB               | 低     | 程式化 init 用 IF NOT EXISTS / ALTER TABLE IF NOT EXISTS        |
+| 風險                              | 嚴重度 | 緩解措施                                                     |
+| --------------------------------- | ------ | ------------------------------------------------------------ |
+| 單一 DB 檔案過大                  | 中     | 預估 100 群組 × 1 年 = 300-400 GB，需監控並規劃歸檔策略      |
+| WAL 檔案增長                      | 低     | Litestream 持續備份 WAL，自動 checkpoint                     |
+| Schema 變更影響所有群組           | 低     | 程式化 init 用 IF NOT EXISTS / ALTER TABLE IF NOT EXISTS     |
+| 備份一致性                        | 低     | Litestream 提供 point-in-time recovery                       |
 
 ## 附錄：Agent 框架記憶架構參考
 
