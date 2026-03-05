@@ -25,12 +25,12 @@ export interface AgentServices {
   generateReply: typeof generateReply
   deliverReply: typeof deliverReply
   deliverReaction: typeof deliverReaction
-  runObserver: typeof runObserver
+  runObserver: (db: DB, groupId: string, vectorStore: VectorStore, config: Config) => Promise<void>
   processNewChunks: typeof processNewChunks
   recordActivity: typeof recordActivity
   checkFrequency: typeof checkFrequency
-  getOrCreateAlias: (db: DB, userId: string, userName: string) => Promise<{ alias: string, userName: string }>
-  getAliasMap: (db: DB, userIds: string[]) => Promise<Map<string, { alias: string, userName: string }>>
+  getOrCreateAlias: (db: DB, groupId: string, userId: string, userName: string) => Promise<{ alias: string, userName: string }>
+  getAliasMap: (db: DB, groupId: string, userIds: string[]) => Promise<Map<string, { alias: string, userName: string }>>
 }
 
 const defaultServices: AgentServices = {
@@ -103,11 +103,11 @@ export class Agent {
       })
       .info('Received message')
 
-    this.services.saveMessage(this.db, message)
+    this.services.saveMessage(this.db, this.groupId, message)
 
     // Alias upsert：每次收到訊息時更新 alias（追蹤用戶改名）
     try {
-      await this.services.getOrCreateAlias(this.db, message.userId, message.userName)
+      await this.services.getOrCreateAlias(this.db, this.groupId, message.userId, message.userName)
     }
     catch (error) {
       this.log.withError(error).warn('Alias upsert 失敗，繼續處理')
@@ -118,7 +118,7 @@ export class Agent {
       const date = new Date().toISOString().slice(0, 10) // UTC YYYY-MM-DD
       const isSticker = message.content === STICKER_CONTENT
       const hasUrl = containsUrl(message.content)
-      this.services.recordActivity(this.db, {
+      this.services.recordActivity(this.db, this.groupId, {
         userId: message.userId,
         date,
         isSticker,
@@ -174,7 +174,7 @@ export class Agent {
    */
   private async runPipeline(platform: 'discord' | 'line', startTime: number, isMention: boolean): Promise<void> {
     // 頻率控制：在 LLM pipeline 之前決定是否回應
-    const decision = this.services.checkFrequency(this.db, this.config, isMention)
+    const decision = this.services.checkFrequency(this.db, this.groupId, this.config, isMention)
     if (!decision.shouldRespond) {
       this.log
         .withMetadata(decision.metadata)
@@ -182,12 +182,12 @@ export class Agent {
       return
     }
 
-    const recentMessages = this.services.getRecentMessages(this.db, this.config.CONTEXT_RECENT_MESSAGE_COUNT)
+    const recentMessages = this.services.getRecentMessages(this.db, this.groupId, this.config.CONTEXT_RECENT_MESSAGE_COUNT)
     this.log.withMetadata({ recentCount: recentMessages.length }).debug('Fetched recent messages')
 
     // 查詢 alias map（用於 context 組裝和回覆後處理）
     const nonBotUserIds = [...new Set(recentMessages.filter(m => !m.isBot).map(m => m.userId))]
-    const aliasMap = await this.services.getAliasMap(this.db, nonBotUserIds)
+    const aliasMap = await this.services.getAliasMap(this.db, this.groupId, nonBotUserIds)
     const reverseMap = new Map([...aliasMap.entries()].map(([, { alias, userName }]) => [alias, userName]))
 
     this.log.debug('Assembling context...')
@@ -195,6 +195,7 @@ export class Agent {
       recentMessages,
       config: this.config,
       db: this.db,
+      groupId: this.groupId,
       vectorStore: this.vectorStore,
     })
     this.log.withMetadata({ contextMessageCount: contextMessages.length }).debug('Context assembled')
@@ -237,12 +238,12 @@ export class Agent {
             this.log.withMetadata({ platform }).warn('No channel found for platform, skipping delivery')
           }
 
-          this.services.saveBotMessage(this.db, action.content, this.config.BOT_USER_ID)
+          this.services.saveBotMessage(this.db, this.groupId, action.content, this.config.BOT_USER_ID)
 
           // EMA 回饋：bot 實際發送 reply 時更新頻率狀態
           try {
             const now = Date.now()
-            const currentState = getFrequencyState(this.db)
+            const currentState = getFrequencyState(this.db, this.groupId)
             const elapsed = currentState ? now - currentState.lastUpdatedAt : 0
             const decayLong = elapsed > 0
               ? calculateDecay(elapsed, this.config.FREQUENCY_LONG_HALFLIFE_HOURS * 60 * 60 * 1000)
@@ -251,7 +252,7 @@ export class Agent {
               ? calculateDecay(elapsed, this.config.FREQUENCY_SHORT_HALFLIFE_HOURS * 60 * 60 * 1000)
               : 0
 
-            saveFrequencyState(this.db, {
+            saveFrequencyState(this.db, this.groupId, {
               emaLongBot: updateEma(currentState?.emaLongBot ?? 0, 1, decayLong),
               emaLongTotal: updateEma(currentState?.emaLongTotal ?? 0, 1, decayLong),
               emaShortBot: updateEma(currentState?.emaShortBot ?? 0, 1, decayShort),
@@ -291,14 +292,14 @@ export class Agent {
 
     // WHY fire-and-forget：記憶壓縮是 best-effort；失敗表示摘要過時但不影響當前回覆
     this.log.debug('Triggering Observer (background)...')
-    this.services.runObserver(this.db, this.vectorStore, this.config).catch((err) => {
+    this.services.runObserver(this.db, this.groupId, this.vectorStore, this.config).catch((err) => {
       this.log.withError(err).error('Observer error')
     })
 
     // WHY fire-and-forget：向量索引降級可接受，回覆投遞不能失敗
     if (this.config.embeddingEnabled) {
       this.log.debug('Triggering Embedding (background)...')
-      this.services.processNewChunks(this.vectorStore, this.db, this.config).catch((err) => {
+      this.services.processNewChunks(this.vectorStore, this.db, this.groupId, this.config).catch((err) => {
         this.log.withError(err).error('Embedding error')
       })
     }

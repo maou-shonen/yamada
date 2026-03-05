@@ -69,6 +69,7 @@ describe('assembleContext', () => {
       recentMessages: [],
       config,
       db,
+      groupId: 'group-a',
       vectorStore: createFakeVectorStore(),
       deps,
     })
@@ -90,6 +91,7 @@ describe('assembleContext', () => {
       recentMessages: [msg],
       config,
       db,
+      groupId: 'group-a',
       vectorStore: createFakeVectorStore(),
       deps,
     })
@@ -109,6 +111,7 @@ describe('assembleContext', () => {
       recentMessages: [msg],
       config,
       db,
+      groupId: 'group-a',
       vectorStore: createFakeVectorStore(),
       deps,
     })
@@ -120,7 +123,7 @@ describe('assembleContext', () => {
 
   test('Group Summary 以 <group_summary> 包裹出現在 system prompt', async () => {
     const { sqlite, db } = setupTestDb()
-    sqlite.exec(`INSERT INTO group_summaries(id, summary, updated_at) VALUES('singleton','聊天室主要討論技術',${Date.now()})`)
+    sqlite.exec(`INSERT INTO group_summaries(group_id, summary, updated_at) VALUES('group-a','聊天室主要討論技術',${Date.now()})`)
     const config = makeConfig()
     const deps = createFakeDeps()
 
@@ -128,6 +131,7 @@ describe('assembleContext', () => {
       recentMessages: [],
       config,
       db,
+      groupId: 'group-a',
       vectorStore: createFakeVectorStore(),
       deps,
     })
@@ -139,7 +143,7 @@ describe('assembleContext', () => {
 
   test('User Summaries 以 <user_profiles> 包裹出現在 system prompt', async () => {
     const { sqlite, db } = setupTestDb()
-    sqlite.exec(`INSERT INTO user_summaries(id, user_id, summary, updated_at) VALUES('us1','user1','Alice 是工程師',${Date.now()})`)
+    sqlite.exec(`INSERT INTO user_summaries(group_id, user_id, summary, updated_at) VALUES('group-a','user1','Alice 是工程師',${Date.now()})`)
     const config = makeConfig()
     const msg = makeMessage({ userId: 'user1' })
     const deps = createFakeDeps()
@@ -148,6 +152,7 @@ describe('assembleContext', () => {
       recentMessages: [msg],
       config,
       db,
+      groupId: 'group-a',
       vectorStore: createFakeVectorStore(),
       deps,
     })
@@ -170,6 +175,7 @@ describe('assembleContext', () => {
       recentMessages: [newer, older],
       config,
       db,
+      groupId: 'group-a',
       vectorStore: createFakeVectorStore(),
       deps,
     })
@@ -183,9 +189,9 @@ describe('assembleContext', () => {
   test('Token budget 裁剪優先序：先移除語義搜尋，保留用戶摘要', async () => {
     const { sqlite, db } = setupTestDb()
     // 插入用戶摘要
-    sqlite.exec(`INSERT INTO user_summaries(id, user_id, summary, updated_at) VALUES('us1','user1','Alice 是工程師',${Date.now()})`)
+    sqlite.exec(`INSERT INTO user_summaries(group_id, user_id, summary, updated_at) VALUES('group-a','user1','Alice 是工程師',${Date.now()})`)
     // 插入群組摘要
-    sqlite.exec(`INSERT INTO group_summaries(id, summary, updated_at) VALUES('singleton','聊天室主要討論技術',${Date.now()})`)
+    sqlite.exec(`INSERT INTO group_summaries(group_id, summary, updated_at) VALUES('group-a','聊天室主要討論技術',${Date.now()})`)
 
     // 設定 SOUL 和 CONTEXT_MAX_TOKENS 使得移除語義搜尋後剛好符合預算
     const soul = 'S'.repeat(50) // 50 chars
@@ -210,6 +216,7 @@ describe('assembleContext', () => {
       recentMessages: [msg],
       config,
       db,
+      groupId: 'group-a',
       vectorStore: fakeVectorStore,
       deps,
     })
@@ -223,9 +230,9 @@ describe('assembleContext', () => {
   test('Token budget 全部超支 → 語義搜尋和用戶摘要都被裁剪', async () => {
     const { sqlite, db } = setupTestDb()
     // 插入用戶摘要
-    sqlite.exec(`INSERT INTO user_summaries(id, user_id, summary, updated_at) VALUES('us1','user1','Alice 是工程師',${Date.now()})`)
+    sqlite.exec(`INSERT INTO user_summaries(group_id, user_id, summary, updated_at) VALUES('group-a','user1','Alice 是工程師',${Date.now()})`)
     // 插入群組摘要
-    sqlite.exec(`INSERT INTO group_summaries(id, summary, updated_at) VALUES('singleton','聊天室主要討論技術',${Date.now()})`)
+    sqlite.exec(`INSERT INTO group_summaries(group_id, summary, updated_at) VALUES('group-a','聊天室主要討論技術',${Date.now()})`)
 
     // 設定極小的 CONTEXT_MAX_TOKENS 使得兩個都被裁剪
     const soul = 'S'.repeat(100)
@@ -250,6 +257,7 @@ describe('assembleContext', () => {
       recentMessages: [msg],
       config,
       db,
+      groupId: 'group-a',
       vectorStore: fakeVectorStore,
       deps,
     })
@@ -273,6 +281,7 @@ describe('assembleContext', () => {
       recentMessages: [msg],
       config,
       db,
+      groupId: 'group-a',
       vectorStore: createFakeVectorStore(),
       deps,
     })
@@ -300,6 +309,7 @@ describe('assembleContext', () => {
       recentMessages: [msg],
       config,
       db,
+      groupId: 'group-a',
       vectorStore: createFakeVectorStore(),
       deps,
     })
@@ -328,6 +338,7 @@ describe('assembleContext', () => {
       recentMessages: [msg],
       config,
       db,
+      groupId: 'group-a',
       vectorStore: createFakeVectorStore(),
       deps,
     })
@@ -415,6 +426,7 @@ describe('facts injection', () => {
       recentMessages: [makeMessage({ userId: 'u1', content: 'Hi' })],
       config,
       db,
+      groupId: 'group-a',
       vectorStore: createFakeVectorStore(),
       deps,
     })
@@ -445,6 +457,7 @@ describe('facts injection', () => {
       recentMessages: [makeMessage({ userId: 'u1', content: 'Hi' })],
       config,
       db,
+      groupId: 'group-a',
       vectorStore: fakeVectorStore,
       deps,
     })
@@ -484,6 +497,7 @@ describe('facts injection', () => {
       recentMessages: [makeMessage({ userId: 'u1', content: 'Hi' })],
       config,
       db,
+      groupId: 'group-a',
       vectorStore: fakeVectorStore,
       deps,
     })
@@ -519,6 +533,7 @@ describe('facts injection', () => {
       recentMessages: [makeMessage({ userId: 'u1', content: 'Hi' })],
       config,
       db,
+      groupId: 'group-a',
       vectorStore: createFakeVectorStore(),
       deps,
     })

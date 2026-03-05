@@ -77,7 +77,7 @@ function createFakeServices() {
   const processNewChunksMock = mock(async () => {})
   const recordActivityMock = mock(() => {})
   const checkFrequencyMock = mock((...args: unknown[]) => {
-    const isMention = args[2] === true
+    const isMention = args[3] === true
     return {
       shouldRespond: true,
       probability: 1,
@@ -144,7 +144,7 @@ describe('Agent', () => {
     agent.receiveMessage(msg)
 
     expect(mocks.saveMessageMock.mock.calls.length).toBe(1)
-    expect(mocks.saveMessageMock).toHaveBeenCalledWith(expect.anything(), msg)
+    expect(mocks.saveMessageMock).toHaveBeenCalledWith(expect.anything(), 'group1', msg)
     // 確認不會觸發 pipeline
     expect(mocks.assembleContextMock.mock.calls.length).toBe(0)
     expect(mocks.generateReplyMock.mock.calls.length).toBe(0)
@@ -168,6 +168,7 @@ describe('Agent', () => {
     expect(mocks.recordActivityMock.mock.calls.length).toBe(1)
     expect(mocks.recordActivityMock).toHaveBeenCalledWith(
       expect.anything(),
+      'group1',
       expect.objectContaining({
         userId: 'u1',
         isSticker: false,
@@ -196,6 +197,7 @@ describe('Agent', () => {
     expect(mocks.recordActivityMock.mock.calls.length).toBe(1)
     expect(mocks.recordActivityMock).toHaveBeenCalledWith(
       expect.anything(),
+      'group1',
       expect.objectContaining({ isSticker: true }),
     )
   })
@@ -218,6 +220,7 @@ describe('Agent', () => {
     expect(mocks.recordActivityMock.mock.calls.length).toBe(1)
     expect(mocks.recordActivityMock).toHaveBeenCalledWith(
       expect.anything(),
+      'group1',
       expect.objectContaining({ hasUrl: true }),
     )
   })
@@ -240,6 +243,7 @@ describe('Agent', () => {
     expect(mocks.recordActivityMock.mock.calls.length).toBe(1)
     expect(mocks.recordActivityMock).toHaveBeenCalledWith(
       expect.anything(),
+      'group1',
       expect.objectContaining({ isMention: true }),
     )
   })
@@ -322,7 +326,7 @@ describe('Agent', () => {
     const { sqlite, db } = setupTestDb()
     const { services, mocks } = createFakeServices()
     mocks.checkFrequencyMock.mockImplementation((...args: unknown[]) => {
-      const isMention = args[2] === true
+      const isMention = args[3] === true
       return {
         shouldRespond: isMention,
         probability: isMention ? 1 : 0.1,
@@ -367,7 +371,7 @@ describe('Agent', () => {
 
     await agent.processTriggeredMessages('discord', false)
 
-    const state = getFrequencyState(db)
+    const state = getFrequencyState(db, 'group1')
     expect(state).toBeDefined()
     expect(state?.emaLongBot).toBeGreaterThan(0)
   })

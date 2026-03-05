@@ -11,8 +11,8 @@ export interface MainOptions {
   /** 測試時可注入 mock channel，不需要 mock.module() */
   discord?: PlatformChannel
   line?: PlatformChannel
-  /** 測試時可使用 temp dir 避免建立實際檔案 */
-  dbDir?: string
+  /** 測試時可指定 temp DB 路徑 */
+  dbPath?: string
 }
 
 /**
@@ -33,7 +33,7 @@ async function main(options?: MainOptions): Promise<() => Promise<void>> {
     chatModel: config.CHAT_MODEL,
   }).info('Config loaded')
 
-  const app = await bootstrap(config, { dbDir: options?.dbDir })
+  const app = await bootstrap(config, { dbPath: options?.dbPath })
 
   // 條件建立平台 channels
   const activeChannels: PlatformChannel[] = []

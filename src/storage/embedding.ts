@@ -4,7 +4,7 @@ import type { StoredMessage } from '../types'
 import type { DB } from './db'
 import type { VectorStore } from './vector-store'
 import { embed, embedMany } from 'ai'
-import { asc, gte, inArray } from 'drizzle-orm'
+import { and, asc, eq, gte, inArray } from 'drizzle-orm'
 import { createEmbeddingModelFromId } from '../lib/provider.ts'
 import { log } from '../logger'
 import { buildChunks } from './chunking'
@@ -65,14 +65,15 @@ export async function embedTexts(
 export async function processNewChunks(
   vectorStore: VectorStore,
   drizzleDb: DB,
+  groupId: string,
   config: Config,
   deps: EmbeddingDeps = defaultDeps,
 ): Promise<void> {
-  const lastTs = getMaxChunkEndTimestamp(drizzleDb)
+  const lastTs = getMaxChunkEndTimestamp(drizzleDb, groupId)
 
   let messages: StoredMessage[] = lastTs === null
-    ? drizzleDb.select().from(schema.messages).orderBy(asc(schema.messages.timestamp)).all()
-    : drizzleDb.select().from(schema.messages).where(gte(schema.messages.timestamp, lastTs)).orderBy(asc(schema.messages.timestamp)).all()
+    ? drizzleDb.select().from(schema.messages).where(eq(schema.messages.groupId, groupId)).orderBy(asc(schema.messages.timestamp)).all()
+    : drizzleDb.select().from(schema.messages).where(and(eq(schema.messages.groupId, groupId), gte(schema.messages.timestamp, lastTs))).orderBy(asc(schema.messages.timestamp)).all()
 
   if (messages.length === 0) {
     embeddingLog.debug('No messages to process for chunking')
@@ -94,7 +95,7 @@ export async function processNewChunks(
       const parents = drizzleDb
         .select()
         .from(schema.messages)
-        .where(inArray(schema.messages.externalId, uniqueParentIds))
+        .where(and(eq(schema.messages.groupId, groupId), inArray(schema.messages.externalId, uniqueParentIds)))
         .all()
       // 合併 parents + messages，按 timestamp 升序排列（parents 可能已在 messages 中）
       const combined = [
@@ -109,7 +110,7 @@ export async function processNewChunks(
   const chunks = buildChunks(messages, config.CHUNK_TOKEN_LIMIT)
 
   for (const chunk of chunks) {
-    const chunkId = saveChunk(drizzleDb, chunk)
+    const chunkId = saveChunk(drizzleDb, groupId, chunk)
     const embedding = await embedText(chunk.content, config, deps)
     vectorStore.upsertChunkVector(chunkId, embedding)
   }
@@ -124,12 +125,12 @@ export async function processNewChunks(
  *
  * WHY：避免主流程混入 metadata 寫入細節，並確保更新語意集中。
  */
-function updateFactEmbedWatermark(drizzleDb: DB): void {
+function updateFactEmbedWatermark(drizzleDb: DB, groupId: string): void {
   const now = Date.now()
   drizzleDb.insert(schema.factMetadata)
-    .values({ key: 'fact_embed_watermark', value: now })
+    .values({ groupId, key: 'fact_embed_watermark', value: now })
     .onConflictDoUpdate({
-      target: schema.factMetadata.key,
+      target: [schema.factMetadata.groupId, schema.factMetadata.key],
       set: { value: now },
     })
     .run()
@@ -142,11 +143,12 @@ function updateFactEmbedWatermark(drizzleDb: DB): void {
 export async function processNewFactEmbeddings(
   vectorStore: VectorStore,
   drizzleDb: DB,
+  groupId: string,
   config: Config,
   deps: EmbeddingDeps = defaultDeps,
 ): Promise<void> {
   // ── 1) 取得所有 active facts ──
-  const allFacts = getAllActiveFacts(drizzleDb)
+  const allFacts = getAllActiveFacts(drizzleDb, groupId)
   if (allFacts.length === 0) {
     embeddingLog.debug('No facts to process for embedding')
     return
@@ -161,7 +163,7 @@ export async function processNewFactEmbeddings(
   }
 
   // ── 3) 更新 embedding watermark ──
-  updateFactEmbedWatermark(drizzleDb)
+  updateFactEmbedWatermark(drizzleDb, groupId)
 
   embeddingLog
     .withMetadata({ insertedFactVectors: allFacts.length })

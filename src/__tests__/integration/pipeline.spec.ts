@@ -116,8 +116,8 @@ describe('Pipeline 整合測試', () => {
     const channels = new Map<string, PlatformChannel>([['discord', mockChannel]])
 
     const observerServices = createTestServices({
-      runObserver: (mock(async (runDb) => {
-        await upsertGroupSummary(runDb, 'Mock observer summary')
+      runObserver: (mock(async (runDb, groupId) => {
+        await upsertGroupSummary(runDb, groupId as string, 'Mock observer summary')
       }) as unknown) as AgentServices['runObserver'],
     })
 
@@ -143,7 +143,7 @@ describe('Pipeline 整合測試', () => {
     const runObserverMock = observerServices.runObserver as ReturnType<typeof mock>
     expect(runObserverMock.mock.calls.length).toBe(1)
 
-    const groupSummary = await getGroupSummary(db)
+    const groupSummary = await getGroupSummary(db, 'group-a')
     expect(groupSummary).toBe('Mock observer summary')
   })
 })

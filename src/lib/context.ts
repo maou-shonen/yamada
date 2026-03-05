@@ -2,6 +2,7 @@ import type { ModelMessage } from 'ai'
 import type { Config } from '../config/index.ts'
 import type { DB } from '../storage/db'
 import type { Fact } from '../storage/facts'
+import type { SqliteVectorStore } from '../storage/sqlite-vector-store'
 import type { VectorStore } from '../storage/vector-store'
 import type { StoredMessage } from '../types'
 import { log } from '../logger'
@@ -19,7 +20,7 @@ export interface ContextDeps {
   getGroupSummary: typeof getGroupSummary
   embedText: typeof embedText
   getChunkContents: typeof getChunkContents
-  getAliasMap: (db: DB, userIds: string[]) => Promise<Map<string, { alias: string, userName: string }>>
+  getAliasMap: (db: DB, groupId: string, userIds: string[]) => Promise<Map<string, { alias: string, userName: string }>>
   getAllActiveFacts: typeof getAllActiveFacts
 }
 
@@ -36,6 +37,7 @@ export interface AssembleContextParams {
   recentMessages: StoredMessage[]
   config: Config
   db: DB
+  groupId: string
   vectorStore: VectorStore
   deps?: ContextDeps
 }
@@ -100,7 +102,7 @@ function trimSections(
  * 連續的非 bot 訊息合併為單一 user message，維持正確的對話輪次結構。
  */
 export async function assembleContext(params: AssembleContextParams): Promise<ModelMessage[]> {
-  const { recentMessages, config, db, vectorStore } = params
+  const { recentMessages, config, db, groupId, vectorStore } = params
   const deps = params.deps ?? defaultDeps
 
   contextLog.withMetadata({ recentMessageCount: recentMessages.length }).info('Assembling context')
@@ -112,7 +114,7 @@ export async function assembleContext(params: AssembleContextParams): Promise<Mo
   const soulSection = `<soul>\n${config.SOUL}\n</soul>`
 
   let groupSummarySection = ''
-  const groupSummary = await deps.getGroupSummary(db)
+  const groupSummary = await deps.getGroupSummary(db, groupId)
   if (groupSummary) {
     groupSummarySection = `<group_summary>\n${groupSummary}\n</group_summary>`
     contextLog.withMetadata({ groupSummaryLength: groupSummary.length }).debug('Group summary loaded')
@@ -125,8 +127,8 @@ export async function assembleContext(params: AssembleContextParams): Promise<Mo
   const nonBotUserIds = [...new Set(
     recentMessages.filter(m => !m.isBot).map(m => m.userId),
   )]
-  const userSummaryMap = await deps.getUserSummariesForGroup(db, nonBotUserIds)
-  const aliasMap = await deps.getAliasMap(db, nonBotUserIds)
+  const userSummaryMap = await deps.getUserSummariesForGroup(db, groupId, nonBotUserIds)
+  const aliasMap = await deps.getAliasMap(db, groupId, nonBotUserIds)
   const userIdToAliasMap = new Map(
     [...aliasMap.entries()].map(([uid, { alias }]) => [uid, alias]),
   )
@@ -140,7 +142,7 @@ export async function assembleContext(params: AssembleContextParams): Promise<Mo
   // ── Facts：建立查找池（facts pool）──
   // 取得所有 active facts（含 user + group，pinned + non-pinned）建立完整查找池
   // 必須包含所有 active facts，否則語義搜尋回傳的 non-pinned user facts 會找不到對應資料
-  const allActiveFacts = deps.getAllActiveFacts(db)
+  const allActiveFacts = deps.getAllActiveFacts(db, groupId)
   const factsById = new Map(allActiveFacts.map(f => [f.id, f]))
 
   // ── 語義搜尋：chunk + facts ──
@@ -155,16 +157,14 @@ export async function assembleContext(params: AssembleContextParams): Promise<Mo
         contextLog.withMetadata({ query: lastNonBot.content.slice(0, 60) }).debug('Running semantic search')
         queryEmbedding = await deps.embedText(lastNonBot.content, config)
 
-        // Chunk 語義搜尋
-        const similar = vectorStore.searchChunks(
-          queryEmbedding,
-          config.CONTEXT_SEMANTIC_TOP_K,
-          config.CONTEXT_SEMANTIC_THRESHOLD,
-        )
+        // Chunk 語義搜尋（group-scoped if available）
+        const similar = 'searchChunksForGroup' in vectorStore
+          ? (vectorStore as SqliteVectorStore).searchChunksForGroup(groupId, queryEmbedding, config.CONTEXT_SEMANTIC_TOP_K, config.CONTEXT_SEMANTIC_THRESHOLD)
+          : vectorStore.searchChunks(queryEmbedding, config.CONTEXT_SEMANTIC_TOP_K, config.CONTEXT_SEMANTIC_THRESHOLD)
         contextLog.withMetadata({ resultsCount: similar.length }).debug('Semantic search results')
         if (similar.length > 0) {
           const chunkIds = similar.map(s => s.id)
-          const contents = deps.getChunkContents(db, chunkIds)
+          const contents = deps.getChunkContents(db, groupId, chunkIds)
           if (contents.length > 0) {
             const replacedContents = contents.map(content => replaceUserIdsWithAliases(content, userIdToAliasMap))
             semanticSection = `<related_history>\n${replacedContents.join('\n')}\n</related_history>`
@@ -183,11 +183,9 @@ export async function assembleContext(params: AssembleContextParams): Promise<Mo
   const searchedFacts: Fact[] = []
   if (queryEmbedding) {
     try {
-      const factResults = vectorStore.searchFacts(
-        queryEmbedding,
-        config.CONTEXT_FACT_TOP_K,
-        config.CONTEXT_FACT_THRESHOLD,
-      )
+      const factResults = 'searchFactsForGroup' in vectorStore
+        ? (vectorStore as SqliteVectorStore).searchFactsForGroup(groupId, queryEmbedding, config.CONTEXT_FACT_TOP_K, config.CONTEXT_FACT_THRESHOLD)
+        : vectorStore.searchFacts(queryEmbedding, config.CONTEXT_FACT_TOP_K, config.CONTEXT_FACT_THRESHOLD)
       for (const { id: factId } of factResults) {
         const fact = factsById.get(factId)
         if (fact && fact.confidence >= config.FACT_CONFIDENCE_THRESHOLD && !fact.pinned) {

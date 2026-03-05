@@ -62,6 +62,74 @@ export class SqliteVectorStore implements VectorStore {
     return this.search(FACT_TABLE, queryEmbedding, topK, threshold)
   }
 
+  // Design: Cross-group vector search + post-filter
+  // The VectorStore interface is intentionally kept group-agnostic (no groupId param).
+  // Instead, SqliteVectorStore provides group-scoped wrapper methods that:
+  // 1. Search topK*3 candidates to compensate for cross-group dilution
+  // 2. Filter results by joining with the source table's group_id column
+  // This avoids modifying the VectorStore interface while ensuring group isolation.
+
+  /**
+   * Group-scoped chunk semantic search.
+   * Searches with topK*3 candidates from the shared vector index,
+   * then filters to only chunks belonging to the specified group.
+   */
+  searchChunksForGroup(
+    groupId: string,
+    queryEmbedding: number[],
+    topK: number,
+    threshold: number,
+  ): VectorSearchResult[] {
+    return this.searchForGroup('chunks', CHUNK_TABLE, groupId, queryEmbedding, topK, threshold)
+  }
+
+  /**
+   * Group-scoped fact semantic search.
+   * Searches with topK*3 candidates from the shared vector index,
+   * then filters to only facts belonging to the specified group.
+   */
+  searchFactsForGroup(
+    groupId: string,
+    queryEmbedding: number[],
+    topK: number,
+    threshold: number,
+  ): VectorSearchResult[] {
+    return this.searchForGroup('facts', FACT_TABLE, groupId, queryEmbedding, topK, threshold)
+  }
+
+  /**
+   * Shared implementation for group-scoped vector search.
+   * Over-fetches candidates (topK * 3) then post-filters by group_id via JOIN
+   * with the source table, returning at most topK results.
+   */
+  private searchForGroup(
+    sourceTable: string,
+    vectorTable: string,
+    groupId: string,
+    queryEmbedding: number[],
+    topK: number,
+    threshold: number,
+  ): VectorSearchResult[] {
+    // Over-fetch to compensate for cross-group dilution
+    const compensatedTopK = topK * 3
+    const candidates = this.search(vectorTable, queryEmbedding, compensatedTopK, threshold)
+
+    if (candidates.length === 0)
+      return []
+
+    // Filter candidates by group_id via the source table
+    const placeholders = candidates.map(() => '?').join(', ')
+    const matchingIds = new Set(
+      (this.db.prepare(
+        `SELECT id FROM ${sourceTable} WHERE id IN (${placeholders}) AND group_id = ?`,
+      ).all(...candidates.map(c => c.id), groupId) as Array<{ id: number }>).map(r => r.id),
+    )
+
+    return candidates
+      .filter(c => matchingIds.has(c.id))
+      .slice(0, topK)
+  }
+
   private initializeVectorTable(table: string, dimensions: number): void {
     try {
       this.db.exec(

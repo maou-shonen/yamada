@@ -5,7 +5,7 @@ import { join } from 'node:path'
  * E2E 冒煙測試套件
  *
  * 核心價值：使用真實 file-based SQLite + 真實 sqlite-vector（非 mock），
- * 驗證完整資料流（per-group DB init → 儲存 → embedding → 搜尋 → observer 觸發條件）。
+ * 驗證完整資料流（single DB init → 儲存 → embedding → 搜尋 → observer 觸發條件）。
  *
  * 重要：此測試不 mock 'ai' 或 '@ai-sdk/openai' 套件，
  * 避免 Bun top-level mock 污染其他測試文件。
@@ -16,7 +16,8 @@ import { createTestConfig } from '../helpers/config.ts'
 
 // ─── 直接 import 真實模組（無 mock）───
 
-const { openGroupDb, GroupDbManager } = await import('../../storage/db')
+const { openDb, closeDb } = await import('../../storage/db')
+const { SqliteVectorStore } = await import('../../storage/sqlite-vector-store')
 const { saveChunk } = await import('../../storage/chunks')
 const { saveMessage, getRecentMessages } = await import('../../storage/messages')
 const { getGroupSummary, upsertGroupSummary } = await import('../../storage/summaries')
@@ -58,12 +59,12 @@ function ensureEnv(): void {
 // ─── 測試場景 ───
 
 describe('E2E 冒煙測試', () => {
-  // ─── 場景 1: DB 完整性 — per-group DB init + vector tables ───
-  test('DB 完整性：openGroupDb 建立所有 tables + vector tables 存在', async () => {
-    const { sqlite, db, vectorStore } = openGroupDb(tmpDir, 'group-e2e', TEST_DIMENSIONS)
+  // ─── 場景 1: DB 完整性 — single DB init + vector tables ───
+  test('DB 完整性：openDb 建立所有 tables + vector tables 存在', async () => {
+    const appDb = openDb(join(tmpDir, 'yamada.db'), TEST_DIMENSIONS)
 
     // 驗證核心 tables 存在
-    const tables = sqlite
+    const tables = appDb.sqlite
       .prepare('SELECT name FROM sqlite_master WHERE type=\'table\'')
       .all() as { name: string }[]
     const tableNames = tables.map(t => t.name)
@@ -75,7 +76,7 @@ describe('E2E 冒煙測試', () => {
     expect(tableNames).toContain('chunk_embeddings')
     expect(tableNames).toContain('fact_embeddings')
 
-    sqlite.close()
+    closeDb(appDb)
   })
 
   // ─── 場景 2: Config 驗證 ───
@@ -99,7 +100,9 @@ describe('E2E 冒煙測試', () => {
 
   // ─── 場景 3: 訊息存取完整週期 — save → get → embedding → search ───
   test('訊息存取完整週期：save → get → embedding → search 結果一致', async () => {
-    const { sqlite, db, vectorStore } = openGroupDb(tmpDir, 'group-a', TEST_DIMENSIONS)
+    const appDb = openDb(join(tmpDir, 'yamada.db'), TEST_DIMENSIONS)
+    const { db, sqlite } = appDb
+    const vectorStore = new SqliteVectorStore(sqlite)
 
     // 存入訊息
     const msg = {
@@ -113,10 +116,10 @@ describe('E2E 冒煙測試', () => {
       isBot: false,
       isMention: false,
     }
-    saveMessage(db, msg)
+    saveMessage(db, 'group-a', msg)
 
     // 取出訊息
-    const msgs = getRecentMessages(db, 10)
+    const msgs = getRecentMessages(db, 'group-a', 10)
     expect(msgs.length).toBe(1)
     expect(msgs[0].content).toBe('測試訊息內容')
 
@@ -125,7 +128,7 @@ describe('E2E 冒煙測試', () => {
     const ts = msgs[0].timestamp
 
     // 建立 chunk 記錄（用於 chunk-based embedding）
-    const chunkId = saveChunk(db, {
+    const chunkId = saveChunk(db, 'group-a', {
       content: '測試訊息內容',
       messageIds: [messageId],
       startTimestamp: ts,
@@ -141,17 +144,16 @@ describe('E2E 冒煙測試', () => {
     expect(results.length).toBeGreaterThan(0)
     expect(results[0].id).toBe(chunkId)
 
-    sqlite.close()
+    closeDb(appDb)
   })
 
-  // ─── 場景 4: per-group DB 隔離 ───
-  test('per-group DB 隔離：group-a 的資料在 group-b 不可見', async () => {
-    const manager = new GroupDbManager(tmpDir, TEST_DIMENSIONS)
-    const { db: dbA } = manager.getOrCreate('group-a')
-    const { db: dbB } = manager.getOrCreate('group-b')
+  // ─── 場景 4: single DB group_id 隔離 ───
+  test('single DB group_id 隔離：group-a 的資料在 group-b 不可見', async () => {
+    const appDb = openDb(join(tmpDir, 'yamada.db'), TEST_DIMENSIONS)
+    const { db } = appDb
 
     // 存入 group-a 的訊息
-    saveMessage(dbA, {
+    saveMessage(db, 'group-a', {
       id: 'msg-a',
       groupId: 'group-a',
       userId: 'user-1',
@@ -164,7 +166,7 @@ describe('E2E 冒煙測試', () => {
     })
 
     // 存入 group-b 的訊息
-    saveMessage(dbB, {
+    saveMessage(db, 'group-b', {
       id: 'msg-b',
       groupId: 'group-b',
       userId: 'user-2',
@@ -176,22 +178,23 @@ describe('E2E 冒煙測試', () => {
       isMention: false,
     })
 
-    // group-a DB 只有 group-a 的訊息
-    const msgsA = getRecentMessages(dbA, 10)
+    // group-a 只有 group-a 的訊息
+    const msgsA = getRecentMessages(db, 'group-a', 10)
     expect(msgsA.length).toBe(1)
     expect(msgsA[0].content).toBe('group-a 訊息')
 
-    // group-b DB 只有 group-b 的訊息
-    const msgsB = getRecentMessages(dbB, 10)
+    // group-b 只有 group-b 的訊息
+    const msgsB = getRecentMessages(db, 'group-b', 10)
     expect(msgsB.length).toBe(1)
     expect(msgsB[0].content).toBe('group-b 訊息')
 
-    manager.closeAll()
+    closeDb(appDb)
   })
 
   // ─── 場景 5: Observer 觸發條件（不呼叫 AI）───
   test('Observer 觸發條件：訊息數超過 threshold → shouldRun 回傳 true', async () => {
-    const { sqlite, db } = openGroupDb(tmpDir, 'group-obs', TEST_DIMENSIONS)
+    const appDb = openDb(join(tmpDir, 'yamada.db'), TEST_DIMENSIONS)
+    const { db } = appDb
 
     ensureEnv()
     const config = createTestConfig({
@@ -210,7 +213,7 @@ describe('E2E 冒煙測試', () => {
 
     // 存入 2 則訊息（< threshold）→ shouldRun 應為 false
     for (let i = 0; i < 2; i++) {
-      saveMessage(db, {
+      saveMessage(db, 'group-obs', {
         id: `obs-e2e-${i}`,
         groupId: 'group-obs',
         userId: `user-${i % 2}`,
@@ -222,11 +225,11 @@ describe('E2E 冒煙測試', () => {
         isMention: false,
       })
     }
-    expect(shouldRun(db, config)).toBe(false)
+    expect(shouldRun(db, 'group-obs', config)).toBe(false)
 
     // 再存入 2 則（共 4 則 >= threshold 3）→ shouldRun 應為 true
     for (let i = 2; i < 4; i++) {
-      saveMessage(db, {
+      saveMessage(db, 'group-obs', {
         id: `obs-e2e-${i}`,
         groupId: 'group-obs',
         userId: `user-${i % 2}`,
@@ -238,12 +241,12 @@ describe('E2E 冒煙測試', () => {
         isMention: false,
       })
     }
-    expect(shouldRun(db, config)).toBe(true)
+    expect(shouldRun(db, 'group-obs', config)).toBe(true)
 
     // 建立摘要後（模擬 observer 執行）→ shouldRun 應為 false
-    await upsertGroupSummary(db, '群組摘要')
-    expect(shouldRun(db, config)).toBe(false)
+    upsertGroupSummary(db, 'group-obs', '群組摘要')
+    expect(shouldRun(db, 'group-obs', config)).toBe(false)
 
-    sqlite.close()
+    closeDb(appDb)
   })
 })

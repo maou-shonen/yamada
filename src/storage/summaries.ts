@@ -1,17 +1,16 @@
 import type { DB } from './db'
-import { eq, inArray } from 'drizzle-orm'
+import { and, eq, inArray } from 'drizzle-orm'
 import * as schema from './schema'
-
-const GROUP_SUMMARY_ID = 'singleton'
 
 export function getUserSummary(
   db: DB,
+  groupId: string,
   userId: string,
 ): string | null {
   const row = db
     .select({ summary: schema.userSummaries.summary })
     .from(schema.userSummaries)
-    .where(eq(schema.userSummaries.userId, userId))
+    .where(and(eq(schema.userSummaries.groupId, groupId), eq(schema.userSummaries.userId, userId)))
     .get()
 
   return row?.summary ?? null
@@ -19,6 +18,7 @@ export function getUserSummary(
 
 export function upsertUserSummary(
   db: DB,
+  groupId: string,
   userId: string,
   summary: string,
 ): void {
@@ -26,12 +26,13 @@ export function upsertUserSummary(
     .insert(schema.userSummaries)
     .values({
       id: crypto.randomUUID(),
+      groupId,
       userId,
       summary,
       updatedAt: Date.now(),
     })
     .onConflictDoUpdate({
-      target: [schema.userSummaries.userId],
+      target: [schema.userSummaries.groupId, schema.userSummaries.userId],
       set: {
         summary,
         updatedAt: Date.now(),
@@ -42,11 +43,12 @@ export function upsertUserSummary(
 
 export function getGroupSummary(
   db: DB,
+  groupId: string,
 ): string | null {
   const row = db
     .select({ summary: schema.groupSummaries.summary })
     .from(schema.groupSummaries)
-    .where(eq(schema.groupSummaries.id, GROUP_SUMMARY_ID))
+    .where(eq(schema.groupSummaries.groupId, groupId))
     .get()
 
   return row?.summary ?? null
@@ -54,17 +56,18 @@ export function getGroupSummary(
 
 export function upsertGroupSummary(
   db: DB,
+  groupId: string,
   summary: string,
 ): void {
   db
     .insert(schema.groupSummaries)
     .values({
-      id: GROUP_SUMMARY_ID,
+      groupId,
       summary,
       updatedAt: Date.now(),
     })
     .onConflictDoUpdate({
-      target: [schema.groupSummaries.id],
+      target: [schema.groupSummaries.groupId],
       set: {
         summary,
         updatedAt: Date.now(),
@@ -75,6 +78,7 @@ export function upsertGroupSummary(
 
 export function getUserSummariesForGroup(
   db: DB,
+  groupId: string,
   userIds: string[],
 ): Map<string, string> {
   if (userIds.length === 0) {
@@ -84,7 +88,7 @@ export function getUserSummariesForGroup(
   const rows = db
     .select()
     .from(schema.userSummaries)
-    .where(inArray(schema.userSummaries.userId, userIds))
+    .where(and(eq(schema.userSummaries.groupId, groupId), inArray(schema.userSummaries.userId, userIds)))
     .all()
 
   return new Map(rows.map(row => [row.userId, row.summary]))

@@ -9,6 +9,7 @@ describe('messages.replyToExternalId', () => {
     const now = Date.now()
 
     await db.insert(messages).values({
+      groupId: 'group-a',
       externalId: 'msg-reply',
       userId: 'user-1',
       content: '답장 메시지',
@@ -27,6 +28,7 @@ describe('messages.replyToExternalId', () => {
     const now = Date.now()
 
     await db.insert(messages).values({
+      groupId: 'group-a',
       externalId: 'msg-no-reply',
       userId: 'user-2',
       content: '일반 메시지',
@@ -48,6 +50,7 @@ describe('chunks 테이블', () => {
     const endTs = 1_700_001_000
 
     await db.insert(chunks).values({
+      groupId: 'group-a',
       content: '요약된 청크 내용',
       messageIds,
       startTimestamp: startTs,
@@ -68,7 +71,8 @@ describe('messages_external_id_idx 인덱스', () => {
     const { sqlite } = setupTestDb()
 
     // EXPLAIN QUERY PLAN 으로 인덱스 사용 여부 확인
-    const plan = sqlite.query('EXPLAIN QUERY PLAN SELECT * FROM messages WHERE external_id = ?').all('test-id')
+    // Index is composite (group_id, external_id), so both columns must be in WHERE clause
+    const plan = sqlite.query('EXPLAIN QUERY PLAN SELECT * FROM messages WHERE group_id = ? AND external_id = ?').all('group-a', 'test-id')
     const planText = plan.map((row: unknown) => Object.values(row as Record<string, unknown>).join(' ')).join('\n')
 
     expect(planText).toContain('messages_external_id_idx')

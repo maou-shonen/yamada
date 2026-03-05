@@ -142,14 +142,12 @@ describe('T3-ISOLATE: 多群組隔離 + 跨平台整合測試', () => {
   test('IS-1: 兩個群組各有獨立 Agent — group-A 的訊息不出現在 group-B 的 DB', async () => {
     const tmpDir = makeTempDir()
     tempDirs.push(tmpDir)
-    const dbDir = path.join(tmpDir, 'groups')
-    mkdirSync(dbDir, { recursive: true })
-    const mainDbPath = path.join(tmpDir, 'main.db')
+    const dbPath = path.join(tmpDir, 'yamada.db')
 
     const services = createChainServices()
     const config = makeTestConfig()
 
-    const ctx = await bootstrap(config, { dbDir, mainDbPath, agentServices: services })
+    const ctx = await bootstrap(config, { dbPath, agentServices: services })
     const fakeChannel = makeFakeChannel('discord')
     await ctx.startChannels([fakeChannel])
 
@@ -177,17 +175,15 @@ describe('T3-ISOLATE: 多群組隔離 + 跨平台整合測試', () => {
     expect(ctx.groupAgents.has('group-a')).toBe(true)
     expect(ctx.groupAgents.has('group-b')).toBe(true)
 
-    // 驗證：group-A DB 只有 group-A 的訊息
-    const { db: dbA } = ctx.manager.getOrCreate('group-a')
-    const messagesA = getRecentMessages(dbA, 50)
+    // 驗證：group-A 只看得到 group-A 的訊息
+    const messagesA = getRecentMessages(ctx.appDb.db, 'group-a', 50)
     expect(messagesA.length).toBeGreaterThanOrEqual(1)
     expect(messagesA.some(m => m.content === 'group-A 訊息 1')).toBe(true)
     expect(messagesA.some(m => m.content === 'group-A 訊息 1')).toBe(true)
     expect(messagesA.some(m => m.content === 'group-B 訊息 1')).toBe(false)
 
-    // 驗證：group-B DB 只有 group-B 的訊息
-    const { db: dbB } = ctx.manager.getOrCreate('group-b')
-    const messagesB = getRecentMessages(dbB, 50)
+    // 驗證：group-B 只看得到 group-B 的訊息
+    const messagesB = getRecentMessages(ctx.appDb.db, 'group-b', 50)
     expect(messagesB.length).toBeGreaterThanOrEqual(1)
     expect(messagesB.some(m => m.content === 'group-B 訊息 1')).toBe(true)
     expect(messagesB.some(m => m.content === 'group-B 訊息 1')).toBe(true)
@@ -205,14 +201,12 @@ describe('T3-ISOLATE: 多群組隔離 + 跨平台整合測試', () => {
   test('IS-2: Discord 和 LINE 訊息路由到不同群組 → 各自投遞到對應 channel', async () => {
     const tmpDir = makeTempDir()
     tempDirs.push(tmpDir)
-    const dbDir = path.join(tmpDir, 'groups')
-    mkdirSync(dbDir, { recursive: true })
-    const mainDbPath = path.join(tmpDir, 'main.db')
+    const dbPath = path.join(tmpDir, 'yamada.db')
 
     const services = createChainServices()
     const config = makeTestConfig()
 
-    const ctx = await bootstrap(config, { dbDir, mainDbPath, agentServices: services })
+    const ctx = await bootstrap(config, { dbPath, agentServices: services })
 
     // 建立兩個 fake channel（模擬 Discord 和 LINE）
     const discordChannel = makeFakeChannel('discord')
@@ -250,12 +244,10 @@ describe('T3-ISOLATE: 多群組隔離 + 跨平台整合測試', () => {
     expect(lineSendMock.mock.calls.length).toBeGreaterThanOrEqual(1)
 
     // 驗證：各群組 DB 中的訊息來自正確的平台
-    const { db: dbD } = ctx.manager.getOrCreate('group-d')
-    const messagesD = getRecentMessages(dbD, 50)
+    const messagesD = getRecentMessages(ctx.appDb.db, 'group-d', 50)
     expect(messagesD.some(m => m.content === 'Discord 訊息')).toBe(true)
 
-    const { db: dbL } = ctx.manager.getOrCreate('group-l')
-    const messagesL = getRecentMessages(dbL, 50)
+    const messagesL = getRecentMessages(ctx.appDb.db, 'group-l', 50)
     expect(messagesL.some(m => m.content === 'LINE 訊息')).toBe(true)
 
     await ctx.shutdown([discordChannel, lineChannel])
@@ -264,9 +256,7 @@ describe('T3-ISOLATE: 多群組隔離 + 跨平台整合測試', () => {
   test('IS-3: 同一群組 trigger 獨立 — group-A 觸發不影響 group-B 的 pending trigger', async () => {
     const tmpDir = makeTempDir()
     tempDirs.push(tmpDir)
-    const dbDir = path.join(tmpDir, 'groups')
-    mkdirSync(dbDir, { recursive: true })
-    const mainDbPath = path.join(tmpDir, 'main.db')
+    const dbPath = path.join(tmpDir, 'yamada.db')
 
     // 使用 fake scheduler 避免自動觸發，只驗證 trigger 狀態
     const fakeSchedulerFactory = mock((): { start: () => void, stop: () => Promise<void> } => ({
@@ -278,8 +268,7 @@ describe('T3-ISOLATE: 多群組隔離 + 跨平台整合測試', () => {
     const config = makeTestConfig()
 
     const ctx = await bootstrap(config, {
-      dbDir,
-      mainDbPath,
+      dbPath,
       createScheduler: fakeSchedulerFactory,
       agentServices: services,
     })
@@ -302,8 +291,8 @@ describe('T3-ISOLATE: 多群組隔離 + 跨平台整合測試', () => {
     // 等待訊息處理
     await sleep(100)
 
-    // 驗證 main.db 中的 trigger 狀態
-    const sqlite = new Database(mainDbPath, { readonly: true })
+    // 驗證 DB 中的 trigger 狀態
+    const sqlite = new Database(dbPath, { readonly: true })
 
     // group-A trigger：overflow 觸發，trigger_at 應該很短（接近現在）
     const triggerA = sqlite.query('SELECT * FROM pending_triggers WHERE group_id = ?').get('group-a-trigger') as Record<string, unknown> | null

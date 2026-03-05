@@ -182,7 +182,7 @@ describe('Frequency pipeline 整合測試', () => {
 
     await agent.processTriggeredMessages('discord', false)
 
-    const state = getFrequencyState(db)
+    const state = getFrequencyState(db, 'group-a')
     expect(state).toBeDefined()
     expect(state?.emaLongBot).toBeGreaterThan(0)
   })
@@ -193,7 +193,7 @@ describe('Frequency pipeline 整合測試', () => {
 
     const { services, mocks } = createTestServices({
       checkFrequency: (mock((...args: unknown[]) => {
-        const isMention = args[2] === true
+        const isMention = args[3] === true
         return {
           shouldRespond: isMention,
           probability: isMention ? 1 : 0.05,
