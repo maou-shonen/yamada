@@ -255,7 +255,9 @@ async function runFactExtraction(
     // 先推進 watermark 再處理 embedding——embedding 失敗不應阻擋 watermark 前進，
     // 否則相同訊息會被重複萃取，導致 evidence_count 膨脹
     deps.setFactWatermark(db, factExtractionStartTime)
-    await deps.processNewFactEmbeddings(vectorStore, db, config)
+    if (results.length > 0) {
+      await deps.processNewFactEmbeddings(vectorStore, db, config)
+    }
   }
   catch (err) {
     observerLog.withError(err instanceof Error ? err : new Error(String(err))).warn('Fact extraction failed, continuing with summary compression')
