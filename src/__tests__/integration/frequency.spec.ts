@@ -1,7 +1,19 @@
 import type { AgentServices } from '../../agent/index'
+import type { VectorStore } from '../../storage/vector-store'
 import type { PlatformChannel } from '../../types'
 import { describe, expect, mock, test } from 'bun:test'
 import { Agent } from '../../agent/index'
+
+function createFakeVectorStore(): VectorStore {
+  return {
+    init: () => {},
+    upsertChunkVector: () => {},
+    searchChunks: () => [],
+    upsertFactVector: () => {},
+    deleteFactVectors: () => {},
+    searchFacts: () => [],
+  }
+}
 import { getFrequencyState } from '../../storage/frequency-stats'
 import { getRecentMessages, saveBotMessage, saveMessage } from '../../storage/messages'
 import { createTestConfig } from '../helpers/config.ts'
@@ -88,7 +100,7 @@ function createTestServices(overrides: Partial<AgentServices> = {}) {
 describe('Frequency pipeline 整合測試', () => {
   test('頻率控制 skip 時 LLM 不被呼叫', async () => {
     const config = makeTestConfig()
-    const { sqlite: sqliteDb, db } = setupTestDb()
+    const { db } = setupTestDb()
 
     const { services, mocks } = createTestServices({
       checkFrequency: (mock(() => ({
@@ -110,7 +122,7 @@ describe('Frequency pipeline 整合測試', () => {
       groupId: 'group-a',
       config,
       db,
-      sqliteDb,
+      vectorStore: createFakeVectorStore(),
       channels: new Map([['discord', makeMockChannel('discord')]]),
       services,
     })
@@ -122,7 +134,7 @@ describe('Frequency pipeline 整合測試', () => {
 
   test('頻率控制 pass 時 LLM 會被呼叫', async () => {
     const config = makeTestConfig()
-    const { sqlite: sqliteDb, db } = setupTestDb()
+    const { db } = setupTestDb()
 
     const { services, mocks } = createTestServices({
       checkFrequency: (mock(() => ({
@@ -144,7 +156,7 @@ describe('Frequency pipeline 整合測試', () => {
       groupId: 'group-a',
       config,
       db,
-      sqliteDb,
+      vectorStore: createFakeVectorStore(),
       channels: new Map([['discord', makeMockChannel('discord')]]),
       services,
     })
@@ -156,14 +168,14 @@ describe('Frequency pipeline 整合測試', () => {
 
   test('reply 後會更新 frequency_state EMA', async () => {
     const config = makeTestConfig()
-    const { sqlite: sqliteDb, db } = setupTestDb()
+    const { db } = setupTestDb()
     const { services } = createTestServices()
 
     const agent = new Agent({
       groupId: 'group-a',
       config,
       db,
-      sqliteDb,
+      vectorStore: createFakeVectorStore(),
       channels: new Map([['discord', makeMockChannel('discord')]]),
       services,
     })
@@ -177,7 +189,7 @@ describe('Frequency pipeline 整合測試', () => {
 
   test('mention bypass 時即使平常會拒絕仍會通過', async () => {
     const config = makeTestConfig()
-    const { sqlite: sqliteDb, db } = setupTestDb()
+    const { db } = setupTestDb()
 
     const { services, mocks } = createTestServices({
       checkFrequency: (mock((...args: unknown[]) => {
@@ -202,7 +214,7 @@ describe('Frequency pipeline 整合測試', () => {
       groupId: 'group-a',
       config,
       db,
-      sqliteDb,
+      vectorStore: createFakeVectorStore(),
       channels: new Map([['discord', makeMockChannel('discord')]]),
       services,
     })

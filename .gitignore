@@ -44,6 +44,7 @@ data/groups/*
 .sisyphus/
 .sidecar/
 .tailscale/
+.worktree/
 
 # mise local config (個人覆蓋用)
 .mise.local.toml

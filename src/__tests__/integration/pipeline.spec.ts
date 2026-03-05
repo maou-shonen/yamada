@@ -1,7 +1,19 @@
 import type { AgentServices } from '../../agent/index'
+import type { VectorStore } from '../../storage/vector-store'
 import type { PlatformChannel, UnifiedMessage } from '../../types'
 import { describe, expect, mock, test } from 'bun:test'
 import { Agent } from '../../agent/index'
+
+function createFakeVectorStore(): VectorStore {
+  return {
+    init: () => {},
+    upsertChunkVector: () => {},
+    searchChunks: () => [],
+    upsertFactVector: () => {},
+    deleteFactVectors: () => {},
+    searchFacts: () => [],
+  }
+}
 import { deliverReaction, deliverReply } from '../../lib/delivery'
 import {
   getRecentMessages,
@@ -99,7 +111,7 @@ function createTestServices(overrides: Partial<AgentServices> = {}): AgentServic
 describe('Pipeline 整合測試', () => {
   test('Observer fire-and-forget — mock runObserver 寫入 group summary 後可驗證', async () => {
     const config = makeTestConfig({ OBSERVER_MESSAGE_THRESHOLD: 3, OBSERVER_USER_MESSAGE_LIMIT: 50 })
-    const { sqlite: sqliteDb, db } = setupTestDb()
+    const { db } = setupTestDb()
     const mockChannel = makeMockChannel('discord')
     const channels = new Map<string, PlatformChannel>([['discord', mockChannel]])
 
@@ -113,7 +125,7 @@ describe('Pipeline 整合測試', () => {
       groupId: 'group-a',
       config,
       db,
-      sqliteDb,
+      vectorStore: createFakeVectorStore(),
       channels,
       services: observerServices,
     })
@@ -139,7 +151,7 @@ describe('Pipeline 整合測試', () => {
 describe('洩漏防護測試', () => {
   test('LLM context 不包含 Discord snowflake 格式的 userId', async () => {
     const config = makeTestConfig()
-    const { sqlite: sqliteDb, db } = setupTestDb()
+    const { db } = setupTestDb()
     const mockChannel = makeMockChannel('discord')
     const channels = new Map<string, PlatformChannel>([['discord', mockChannel]])
 
@@ -168,7 +180,7 @@ describe('洩漏防護測試', () => {
       groupId: 'group-a',
       config,
       db,
-      sqliteDb,
+      vectorStore: createFakeVectorStore(),
       channels,
       services,
     })

@@ -1,12 +1,12 @@
 import type { ModelMessage } from 'ai'
-import type { Database } from 'bun:sqlite'
 import type { Config } from '../config/index.ts'
 import type { DB } from '../storage/db'
 import type { Fact } from '../storage/facts'
+import type { VectorStore } from '../storage/vector-store'
 import type { StoredMessage } from '../types'
 import { log } from '../logger'
 import { getChunkContents } from '../storage/chunks'
-import { embedText, searchSimilarChunks, searchSimilarFacts } from '../storage/embedding'
+import { embedText } from '../storage/embedding'
 import { getAllActiveFacts } from '../storage/facts'
 import { getGroupSummary, getUserSummariesForGroup } from '../storage/summaries'
 import { getAliasMap } from '../storage/user-aliases'
@@ -18,29 +18,25 @@ export interface ContextDeps {
   getUserSummariesForGroup: typeof getUserSummariesForGroup
   getGroupSummary: typeof getGroupSummary
   embedText: typeof embedText
-  searchSimilarChunks: typeof searchSimilarChunks
   getChunkContents: typeof getChunkContents
   getAliasMap: (db: DB, userIds: string[]) => Promise<Map<string, { alias: string, userName: string }>>
   getAllActiveFacts: typeof getAllActiveFacts
-  searchSimilarFacts: typeof searchSimilarFacts
 }
 
 const defaultDeps: ContextDeps = {
   getUserSummariesForGroup,
   getGroupSummary,
   embedText,
-  searchSimilarChunks,
   getChunkContents,
   getAliasMap,
   getAllActiveFacts,
-  searchSimilarFacts,
 }
 
 export interface AssembleContextParams {
   recentMessages: StoredMessage[]
   config: Config
   db: DB
-  sqliteDb: Database
+  vectorStore: VectorStore
   deps?: ContextDeps
 }
 
@@ -104,7 +100,7 @@ function trimSections(
  * 連續的非 bot 訊息合併為單一 user message，維持正確的對話輪次結構。
  */
 export async function assembleContext(params: AssembleContextParams): Promise<ModelMessage[]> {
-  const { recentMessages, config, db, sqliteDb } = params
+  const { recentMessages, config, db, vectorStore } = params
   const deps = params.deps ?? defaultDeps
 
   contextLog.withMetadata({ recentMessageCount: recentMessages.length }).info('Assembling context')
@@ -160,15 +156,14 @@ export async function assembleContext(params: AssembleContextParams): Promise<Mo
         queryEmbedding = await deps.embedText(lastNonBot.content, config)
 
         // Chunk 語義搜尋
-        const similar = deps.searchSimilarChunks(
-          sqliteDb,
+        const similar = vectorStore.searchChunks(
           queryEmbedding,
           config.CONTEXT_SEMANTIC_TOP_K,
           config.CONTEXT_SEMANTIC_THRESHOLD,
         )
         contextLog.withMetadata({ resultsCount: similar.length }).debug('Semantic search results')
         if (similar.length > 0) {
-          const chunkIds = similar.map(s => s.chunkId)
+          const chunkIds = similar.map(s => s.id)
           const contents = deps.getChunkContents(db, chunkIds)
           if (contents.length > 0) {
             const replacedContents = contents.map(content => replaceUserIdsWithAliases(content, userIdToAliasMap))
@@ -188,13 +183,12 @@ export async function assembleContext(params: AssembleContextParams): Promise<Mo
   const searchedFacts: Fact[] = []
   if (queryEmbedding) {
     try {
-      const factResults = deps.searchSimilarFacts(
-        sqliteDb,
+      const factResults = vectorStore.searchFacts(
         queryEmbedding,
         config.CONTEXT_FACT_TOP_K,
         config.CONTEXT_FACT_THRESHOLD,
       )
-      for (const { factId } of factResults) {
+      for (const { id: factId } of factResults) {
         const fact = factsById.get(factId)
         if (fact && fact.confidence >= config.FACT_CONFIDENCE_THRESHOLD && !fact.pinned) {
           searchedFacts.push(fact)
