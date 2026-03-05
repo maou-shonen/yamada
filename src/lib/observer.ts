@@ -22,9 +22,9 @@ import {
   upsertUserSummary,
 } from '../storage/summaries'
 import { getAliasMap } from '../storage/user-aliases'
+import { createUserMask } from './alias-replacer.ts'
 import { extractFacts } from './fact-extractor.ts'
 import { generateWithFallback } from './llm-utils.ts'
-import { createUserMask } from './alias-replacer.ts'
 
 const observerLog = log.withPrefix('[Observer]')
 

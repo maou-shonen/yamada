@@ -105,8 +105,9 @@ docker compose up      # 啟動（首次會自動 build）
 | `GOOGLE_BASE_URL`           |      | Google AI Studio 自訂端點（不設定則使用官方預設）          |
 | `OPENROUTER_API_KEY`        |      | OpenRouter API Key                                         |
 | `OPENROUTER_BASE_URL`       |      | OpenRouter 自訂端點（預設 `https://openrouter.ai/api/v1`） |
-| `OPENCODE_API_KEY`          |      | OpenCode Zen API Key                                       |
-| `OPENCODE_BASE_URL`         |      | OpenCode Zen 自訂端點（預設 `https://opencode.ai/zen/v1`） |
+| `OPENCODE_API_KEY`          |      | OpenCode API Key                                           |
+| `OPENCODE_BASE_URL`         |      | OpenCode 自訂端點（預設 `https://opencode.ai/zen/v1`）     |
+| `OPENCODE_COMPATIBLE`       |      | OpenCode compatible mode（`openai` / `anthropic` / `gemini`，預設 `openai`） |
 | `TUNNEL_TOKEN`              |      | Cloudflare Tunnel Token（Docker Compose 用）               |
 | `TUNNEL_TOKEN`              |      | Cloudflare Tunnel Token（Docker Compose 用）               |
 
@@ -137,7 +138,7 @@ docker compose up      # 啟動（首次會自動 build）
 | `anthropic`    | Anthropic 官方                 | `ANTHROPIC_API_KEY` / `ANTHROPIC_BASE_URL`   |
 | `google`       | Google AI Studio               | `GOOGLE_API_KEY` / `GOOGLE_BASE_URL`         |
 | `openrouter`   | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` / `OPENROUTER_BASE_URL` |
-| `opencode-zen` | `https://opencode.ai/zen/v1`   | `OPENCODE_API_KEY` / `OPENCODE_BASE_URL`     |
+| `opencode` | `https://opencode.ai/zen/v1`   | `OPENCODE_API_KEY` / `OPENCODE_BASE_URL` / `OPENCODE_COMPATIBLE` |
 
 ### Embedding
 

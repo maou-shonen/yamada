@@ -1,4 +1,3 @@
-import type { ProviderName } from '../lib/provider.ts'
 import process from 'node:process'
 import { z } from 'zod'
 import { DEFAULT_SOUL } from './soul.ts'
@@ -15,21 +14,6 @@ const configSchema = z.object({
   DISCORD_CLIENT_ID: z.string().min(1).optional(),
   LINE_CHANNEL_SECRET: z.string().min(1).optional(),
   LINE_CHANNEL_ACCESS_TOKEN: z.string().min(1).optional(),
-
-  // ── Per-provider AI 憑證（各 provider 獨立設定，只需設定你使用的 provider） ──
-  // 若未設 API_KEY，各 SDK 會自動讀取對應的環境變數（OPENAI_API_KEY、ANTHROPIC_API_KEY 等）
-  // BASE_URL 可選，不設定則使用各 provider 的官方預設端點
-
-  OPENAI_API_KEY: z.string().min(1).optional(),
-  OPENAI_BASE_URL: z.string().url().optional(),
-  ANTHROPIC_API_KEY: z.string().min(1).optional(),
-  ANTHROPIC_BASE_URL: z.string().url().optional(),
-  GOOGLE_API_KEY: z.string().min(1).optional(),
-  GOOGLE_BASE_URL: z.string().url().optional(),
-  OPENROUTER_API_KEY: z.string().min(1).optional(),
-  OPENROUTER_BASE_URL: z.string().url().optional(),
-  OPENCODE_API_KEY: z.string().min(1).optional(),
-  OPENCODE_BASE_URL: z.string().url().optional(),
 
   // ── 人格與基本設定 ──
 
@@ -181,15 +165,9 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     lineEnabled: !!(config.LINE_CHANNEL_SECRET && config.LINE_CHANNEL_ACCESS_TOKEN),
     // embedding 啟用條件：EMBEDDING_MODEL 的 provider 有對應 API 憑證。
     embeddingEnabled: (() => {
-      const provider = config.EMBEDDING_MODEL.split('/')[0] as ProviderName
-      switch (provider) {
-        case 'openai': return !!(config.OPENAI_API_KEY || config.OPENAI_BASE_URL)
-        case 'anthropic': return !!(config.ANTHROPIC_API_KEY || config.ANTHROPIC_BASE_URL)
-        case 'google': return !!(config.GOOGLE_API_KEY || config.GOOGLE_BASE_URL)
-        case 'openrouter': return !!(config.OPENROUTER_API_KEY || config.OPENROUTER_BASE_URL)
-        case 'opencode-zen': return !!(config.OPENCODE_API_KEY || config.OPENCODE_BASE_URL)
-        default: return false
-      }
+      const configSet = config.EMBEDDING_MODEL.split('/')[0]
+      const prefix = configSet.toUpperCase().replace(/-/g, '_')
+      return !!process.env[`${prefix}_API_KEY`]
     })(),
   }
 }

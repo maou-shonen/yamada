@@ -9,18 +9,6 @@ export function createTestConfig(overrides: Partial<Config> = {}): Config {
     LINE_CHANNEL_SECRET: undefined,
     LINE_CHANNEL_ACCESS_TOKEN: undefined,
 
-    // ── Per-provider AI 憑證 ──
-    OPENAI_API_KEY: undefined,
-    OPENAI_BASE_URL: undefined,
-    ANTHROPIC_API_KEY: undefined,
-    ANTHROPIC_BASE_URL: undefined,
-    GOOGLE_API_KEY: undefined,
-    GOOGLE_BASE_URL: undefined,
-    OPENROUTER_API_KEY: undefined,
-    OPENROUTER_BASE_URL: undefined,
-    OPENCODE_API_KEY: undefined,
-    OPENCODE_BASE_URL: undefined,
-
     // ── 人格與基本設定 ──
     SOUL: 'test soul',
     DB_DIR: '/tmp/test-groups/',
