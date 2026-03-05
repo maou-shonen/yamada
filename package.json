@@ -14,13 +14,13 @@
     "@line/bot-sdk": "^10.6.0",
     "@loglayer/transport-log-file-rotation": "^3.0.2",
     "@loglayer/transport-simple-pretty-terminal": "^3.0.2",
+    "@sqliteai/sqlite-vector": "^0.9.92",
     "ai": "^6.0.90",
     "ai-sdk-provider-env": "^0.2.0",
     "discord.js": "^14.25.1",
     "drizzle-orm": "^0.45.1",
     "loglayer": "^9.1.0",
     "serialize-error": "^13.0.1",
-    "sqlite-vec": "^0.1.7-alpha.2",
     "zod": "^4.3.6"
   },
   "devDependencies": {

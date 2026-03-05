@@ -4,7 +4,7 @@ import { join } from 'node:path'
 /**
  * E2E 冒煙測試套件
  *
- * 核心價值：使用真實 file-based SQLite + 真實 sqlite-vec（非 mock），
+ * 核心價值：使用真實 file-based SQLite + 真實 sqlite-vector（非 mock），
  * 驗證完整資料流（per-group DB init → 儲存 → embedding → 搜尋 → observer 觸發條件）。
  *
  * 重要：此測試不 mock 'ai' 或 '@ai-sdk/openai' 套件，
@@ -17,7 +17,6 @@ import { createTestConfig } from '../helpers/config.ts'
 // ─── 直接 import 真實模組（無 mock）───
 
 const { openGroupDb, GroupDbManager } = await import('../../storage/db')
-const { initChunkVectorTable, insertChunkVector, searchSimilarChunks } = await import('../../storage/embedding')
 const { saveChunk } = await import('../../storage/chunks')
 const { saveMessage, getRecentMessages } = await import('../../storage/messages')
 const { getGroupSummary, upsertGroupSummary } = await import('../../storage/summaries')
@@ -38,6 +37,8 @@ const { loadConfig } = await import('../../config/index')
 
 // ─── 臨時目錄管理 ───
 
+const TEST_DIMENSIONS = 1536
+
 let tmpDir: string
 
 beforeEach(async () => {
@@ -57,12 +58,9 @@ function ensureEnv(): void {
 // ─── 測試場景 ───
 
 describe('E2E 冒煙測試', () => {
-  // ─── 場景 1: DB 完整性 — per-group DB init + sqlite-vec virtual table ───
-  test('DB 完整性：openGroupDb 建立所有 tables + sqlite-vec virtual table 存在', async () => {
-    const { sqlite, db } = openGroupDb(tmpDir, 'group-e2e')
-
-    // 初始化 chunk_vectors virtual table（內部呼叫 sqliteVec.load）
-    initChunkVectorTable(sqlite, 1536)
+  // ─── 場景 1: DB 完整性 — per-group DB init + vector tables ───
+  test('DB 完整性：openGroupDb 建立所有 tables + vector tables 存在', async () => {
+    const { sqlite, db, vectorStore } = openGroupDb(tmpDir, 'group-e2e', TEST_DIMENSIONS)
 
     // 驗證核心 tables 存在
     const tables = sqlite
@@ -73,11 +71,9 @@ describe('E2E 冒煙測試', () => {
     expect(tableNames).toContain('user_summaries')
     expect(tableNames).toContain('group_summaries')
 
-    // 驗證 sqlite-vec virtual table 存在
-    const vtables = sqlite
-      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'chunk_vectors%'")
-      .all() as { name: string }[]
-    expect(vtables.length).toBeGreaterThan(0)
+    // 驗證 vector tables 存在（chunk_embeddings 和 fact_embeddings）
+    expect(tableNames).toContain('chunk_embeddings')
+    expect(tableNames).toContain('fact_embeddings')
 
     sqlite.close()
   })
@@ -103,8 +99,7 @@ describe('E2E 冒煙測試', () => {
 
   // ─── 場景 3: 訊息存取完整週期 — save → get → embedding → search ───
   test('訊息存取完整週期：save → get → embedding → search 結果一致', async () => {
-    const { sqlite, db } = openGroupDb(tmpDir, 'group-a')
-    initChunkVectorTable(sqlite, 1536)
+    const { sqlite, db, vectorStore } = openGroupDb(tmpDir, 'group-a', TEST_DIMENSIONS)
 
     // 存入訊息
     const msg = {
@@ -139,19 +134,19 @@ describe('E2E 冒煙測試', () => {
 
     // 插入 chunk 向量（固定向量，繞過 AI 呼叫）
     const embedding: number[] = Array.from({ length: 1536 }, () => 0.1)
-    insertChunkVector(sqlite, chunkId, embedding)
+    vectorStore.upsertChunkVector(chunkId, embedding)
 
     // 語義搜尋（threshold=2.0 放寬，確保同向量能找到）
-    const results = searchSimilarChunks(sqlite, embedding, 5, 2.0)
+    const results = vectorStore.searchChunks(embedding, 5, 2.0)
     expect(results.length).toBeGreaterThan(0)
-    expect(results[0].chunkId).toBe(chunkId)
+    expect(results[0].id).toBe(chunkId)
 
     sqlite.close()
   })
 
   // ─── 場景 4: per-group DB 隔離 ───
   test('per-group DB 隔離：group-a 的資料在 group-b 不可見', async () => {
-    const manager = new GroupDbManager(tmpDir)
+    const manager = new GroupDbManager(tmpDir, TEST_DIMENSIONS)
     const { db: dbA } = manager.getOrCreate('group-a')
     const { db: dbB } = manager.getOrCreate('group-b')
 
@@ -196,7 +191,7 @@ describe('E2E 冒煙測試', () => {
 
   // ─── 場景 5: Observer 觸發條件（不呼叫 AI）───
   test('Observer 觸發條件：訊息數超過 threshold → shouldRun 回傳 true', async () => {
-    const { sqlite, db } = openGroupDb(tmpDir, 'group-obs')
+    const { sqlite, db } = openGroupDb(tmpDir, 'group-obs', TEST_DIMENSIONS)
 
     ensureEnv()
     const config = createTestConfig({

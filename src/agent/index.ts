@@ -1,6 +1,6 @@
-import type { Database } from 'bun:sqlite'
 import type { Config } from '../config/index.ts'
 import type { DB } from '../storage/db'
+import type { VectorStore } from '../storage/vector-store'
 import type { PlatformChannel, UnifiedMessage } from '../types'
 import { replaceAliasesWithNames } from '../lib/alias-replacer'
 import { assembleContext } from '../lib/context'
@@ -53,7 +53,7 @@ export interface AgentOptions {
   groupId: string
   config: Config
   db: DB
-  sqliteDb: Database
+  vectorStore: VectorStore
   channels: Map<string, PlatformChannel>
   services?: AgentServices
 }
@@ -69,7 +69,7 @@ export class Agent {
   private readonly groupId: string
   private readonly config: Config
   private readonly db: DB
-  private readonly sqliteDb: Database
+  private readonly vectorStore: VectorStore
   private readonly channels: Map<string, PlatformChannel>
   private readonly services: AgentServices
   private readonly log: ReturnType<typeof log.withPrefix>
@@ -81,7 +81,7 @@ export class Agent {
     this.groupId = options.groupId
     this.config = options.config
     this.db = options.db
-    this.sqliteDb = options.sqliteDb
+    this.vectorStore = options.vectorStore
     this.channels = options.channels
     this.services = options.services ?? defaultServices
     this.log = log.withPrefix(`[Agent][${options.groupId}]`)
@@ -195,7 +195,7 @@ export class Agent {
       recentMessages,
       config: this.config,
       db: this.db,
-      sqliteDb: this.sqliteDb,
+      vectorStore: this.vectorStore,
     })
     this.log.withMetadata({ contextMessageCount: contextMessages.length }).debug('Context assembled')
 
@@ -291,14 +291,14 @@ export class Agent {
 
     // WHY fire-and-forget：記憶壓縮是 best-effort；失敗表示摘要過時但不影響當前回覆
     this.log.debug('Triggering Observer (background)...')
-    this.services.runObserver(this.db, this.sqliteDb, this.config).catch((err) => {
+    this.services.runObserver(this.db, this.vectorStore, this.config).catch((err) => {
       this.log.withError(err).error('Observer error')
     })
 
     // WHY fire-and-forget：向量索引降級可接受，回覆投遞不能失敗
     if (this.config.embeddingEnabled) {
       this.log.debug('Triggering Embedding (background)...')
-      this.services.processNewChunks(this.sqliteDb, this.db, this.config).catch((err) => {
+      this.services.processNewChunks(this.vectorStore, this.db, this.config).catch((err) => {
         this.log.withError(err).error('Embedding error')
       })
     }

@@ -1,6 +1,6 @@
-import type { Database } from 'bun:sqlite'
 import type { Config } from '../config/index.ts'
 import type { DB } from '../storage/db'
+import type { VectorStore } from '../storage/vector-store'
 import { count, gt } from 'drizzle-orm'
 import { log } from '../logger'
 import { buildGroupCompressionPrompt, buildUserCompressionPrompt, formatChatHistory } from '../prompts/observer'
@@ -199,7 +199,7 @@ export async function compressUserSummaries(
  */
 async function runFactExtraction(
   db: DB,
-  sqliteDb: Database,
+  vectorStore: VectorStore,
   config: Config,
   deps: ObserverDeps,
 ) {
@@ -255,7 +255,9 @@ async function runFactExtraction(
     // 先推進 watermark 再處理 embedding——embedding 失敗不應阻擋 watermark 前進，
     // 否則相同訊息會被重複萃取，導致 evidence_count 膨脹
     deps.setFactWatermark(db, factExtractionStartTime)
-    await deps.processNewFactEmbeddings(sqliteDb, db, config)
+    if (results.length > 0) {
+      await deps.processNewFactEmbeddings(vectorStore, db, config)
+    }
   }
   catch (err) {
     observerLog.withError(err instanceof Error ? err : new Error(String(err))).warn('Fact extraction failed, continuing with summary compression')
@@ -304,7 +306,7 @@ function collectPinnedFacts(
  */
 export async function runObserver(
   db: DB,
-  sqliteDb: Database,
+  vectorStore: VectorStore,
   config: Config,
   deps: ObserverDeps = defaultDeps,
 ): Promise<void> {
@@ -322,7 +324,7 @@ export async function runObserver(
   const userIds = deps.getDistinctUserIds(db, watermark)
 
   // ── 2) Facts 萃取 ──
-  const allActiveFacts = await runFactExtraction(db, sqliteDb, config, deps)
+  const allActiveFacts = await runFactExtraction(db, vectorStore, config, deps)
 
   // ── 3) 收集 pinned facts，執行摘要壓縮 ──
   const { groupPinnedText, userPinnedTextMap } = collectPinnedFacts(allActiveFacts, userIds)

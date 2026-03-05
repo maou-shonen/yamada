@@ -1,7 +1,19 @@
 import type { AgentServices } from '../../agent/index'
+import type { VectorStore } from '../../storage/vector-store'
 import type { PlatformChannel, UnifiedMessage } from '../../types'
 import { describe, expect, mock, test } from 'bun:test'
 import { Agent } from '../../agent/index'
+
+function createFakeVectorStore(): VectorStore {
+  return {
+    init: () => {},
+    upsertChunkVector: () => {},
+    searchChunks: () => [],
+    upsertFactVector: () => {},
+    deleteFactVectors: () => {},
+    searchFacts: () => [],
+  }
+}
 import { deliverReaction, deliverReply } from '../../lib/delivery'
 import {
   getRecentMessages,
@@ -114,7 +126,7 @@ describe('T4-RESILIENCE: 錯誤韌性測試', () => {
       groupId: 'group1',
       config,
       db,
-      sqliteDb: sqlite,
+      vectorStore: createFakeVectorStore(),
       channels: new Map([['discord', channel]]),
       services: failingServices,
     })
@@ -136,7 +148,7 @@ describe('T4-RESILIENCE: 錯誤韌性測試', () => {
       groupId: 'group1',
       config,
       db,
-      sqliteDb: sqlite,
+      vectorStore: createFakeVectorStore(),
       channels: new Map([['discord', channel]]),
       services: workingServices,
     })
@@ -178,7 +190,7 @@ describe('T4-RESILIENCE: 錯誤韌性測試', () => {
       groupId: 'group1',
       config,
       db,
-      sqliteDb: sqlite,
+      vectorStore: createFakeVectorStore(),
       channels: new Map([['discord', fakeChannel]]),
       services,
     })
@@ -221,7 +233,7 @@ describe('T4-RESILIENCE: 錯誤韌性測試', () => {
       groupId: 'group1',
       config,
       db,
-      sqliteDb: sqlite,
+      vectorStore: createFakeVectorStore(),
       channels: new Map([['discord', channel]]),
       services,
     })
@@ -262,7 +274,7 @@ describe('T4-RESILIENCE: 錯誤韌性測試', () => {
       groupId: 'group1',
       config,
       db,
-      sqliteDb: sqlite,
+      vectorStore: createFakeVectorStore(),
       channels: new Map([['discord', channel]]),
       services: failingServices,
     })
@@ -288,7 +300,7 @@ describe('T4-RESILIENCE: 錯誤韌性測試', () => {
       groupId: 'group1',
       config,
       db,
-      sqliteDb: sqlite,
+      vectorStore: createFakeVectorStore(),
       channels: new Map([['discord', channel]]),
       services: workingServices,
     })

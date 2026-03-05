@@ -1,4 +1,5 @@
 import type { Config } from '../config/index.ts'
+import type { VectorStore } from '../storage/vector-store'
 import type { StoredMessage } from '../types'
 import type { ContextDeps } from './context'
 import { describe, expect, test } from 'bun:test'
@@ -41,11 +42,21 @@ function createFakeDeps(): ContextDeps {
     getUserSummariesForGroup,
     getGroupSummary,
     embedText: (async () => [0.1, 0.2, 0.3]) as unknown as ContextDeps['embedText'],
-    searchSimilarChunks: (() => []) as unknown as ContextDeps['searchSimilarChunks'],
     getChunkContents: (() => []) as unknown as ContextDeps['getChunkContents'],
     getAliasMap: (async () => new Map()) as unknown as ContextDeps['getAliasMap'],
     getAllActiveFacts: (() => []) as unknown as ContextDeps['getAllActiveFacts'],
-    searchSimilarFacts: (() => []) as unknown as ContextDeps['searchSimilarFacts'],
+  }
+}
+
+function createFakeVectorStore(overrides: Partial<VectorStore> = {}): VectorStore {
+  return {
+    init: () => {},
+    upsertChunkVector: () => {},
+    searchChunks: () => [],
+    upsertFactVector: () => {},
+    deleteFactVectors: () => {},
+    searchFacts: () => [],
+    ...overrides,
   }
 }
 
@@ -58,7 +69,7 @@ describe('assembleContext', () => {
       recentMessages: [],
       config,
       db,
-      sqliteDb: sqlite,
+      vectorStore: createFakeVectorStore(),
       deps,
     })
 
@@ -79,7 +90,7 @@ describe('assembleContext', () => {
       recentMessages: [msg],
       config,
       db,
-      sqliteDb: sqlite,
+      vectorStore: createFakeVectorStore(),
       deps,
     })
 
@@ -98,7 +109,7 @@ describe('assembleContext', () => {
       recentMessages: [msg],
       config,
       db,
-      sqliteDb: sqlite,
+      vectorStore: createFakeVectorStore(),
       deps,
     })
 
@@ -117,7 +128,7 @@ describe('assembleContext', () => {
       recentMessages: [],
       config,
       db,
-      sqliteDb: sqlite,
+      vectorStore: createFakeVectorStore(),
       deps,
     })
 
@@ -137,7 +148,7 @@ describe('assembleContext', () => {
       recentMessages: [msg],
       config,
       db,
-      sqliteDb: sqlite,
+      vectorStore: createFakeVectorStore(),
       deps,
     })
 
@@ -159,7 +170,7 @@ describe('assembleContext', () => {
       recentMessages: [newer, older],
       config,
       db,
-      sqliteDb: sqlite,
+      vectorStore: createFakeVectorStore(),
       deps,
     })
 
@@ -184,10 +195,12 @@ describe('assembleContext', () => {
       embeddingEnabled: true,
     })
 
-    // 設定 deps：語義搜尋回傳結果
+    // 設定 deps + vectorStore：語義搜尋回傳結果
+    const fakeVectorStore = createFakeVectorStore({
+      searchChunks: () => [{ id: 1, distance: 0.5 }],
+    })
     const deps = {
       ...createFakeDeps(),
-      searchSimilarChunks: (() => [{ chunkId: 'chunk-1', distance: 0.5 }]) as unknown as ContextDeps['searchSimilarChunks'],
       getChunkContents: (() => ['Some relevant history content here']) as unknown as ContextDeps['getChunkContents'],
     }
 
@@ -197,7 +210,7 @@ describe('assembleContext', () => {
       recentMessages: [msg],
       config,
       db,
-      sqliteDb: sqlite,
+      vectorStore: fakeVectorStore,
       deps,
     })
 
@@ -222,10 +235,12 @@ describe('assembleContext', () => {
       embeddingEnabled: true,
     })
 
-    // 設定 deps：語義搜尋回傳結果
+    // 設定 deps + vectorStore：語義搜尋回傳結果
+    const fakeVectorStore = createFakeVectorStore({
+      searchChunks: () => [{ id: 1, distance: 0.5 }],
+    })
     const deps = {
       ...createFakeDeps(),
-      searchSimilarChunks: (() => [{ chunkId: 'chunk-1', distance: 0.5 }]) as unknown as ContextDeps['searchSimilarChunks'],
       getChunkContents: (() => ['Some relevant history content here']) as unknown as ContextDeps['getChunkContents'],
     }
 
@@ -235,7 +250,7 @@ describe('assembleContext', () => {
       recentMessages: [msg],
       config,
       db,
-      sqliteDb: sqlite,
+      vectorStore: fakeVectorStore,
       deps,
     })
 
@@ -249,11 +264,8 @@ describe('assembleContext', () => {
     const { sqlite, db } = setupTestDb()
     const config = makeConfig({ embeddingEnabled: true })
 
-    // 設定 deps：語義搜尋回傳空陣列
-    const deps = {
-      ...createFakeDeps(),
-      searchSimilarChunks: (() => []) as unknown as ContextDeps['searchSimilarChunks'],
-    }
+    // vectorStore 預設 searchChunks 回傳空陣列
+    const deps = createFakeDeps()
 
     const msg = makeMessage({ content: 'Hi' })
 
@@ -261,7 +273,7 @@ describe('assembleContext', () => {
       recentMessages: [msg],
       config,
       db,
-      sqliteDb: sqlite,
+      vectorStore: createFakeVectorStore(),
       deps,
     })
 
@@ -288,7 +300,7 @@ describe('assembleContext', () => {
       recentMessages: [msg],
       config,
       db,
-      sqliteDb: sqlite,
+      vectorStore: createFakeVectorStore(),
       deps,
     })
 
@@ -316,7 +328,7 @@ describe('assembleContext', () => {
       recentMessages: [msg],
       config,
       db,
-      sqliteDb: sqlite,
+      vectorStore: createFakeVectorStore(),
       deps,
     })
 
@@ -403,7 +415,7 @@ describe('facts injection', () => {
       recentMessages: [makeMessage({ userId: 'u1', content: 'Hi' })],
       config,
       db,
-      sqliteDb: sqlite,
+      vectorStore: createFakeVectorStore(),
       deps,
     })
 
@@ -412,30 +424,32 @@ describe('facts injection', () => {
     expect(messages[0].content).toContain('</group_facts>')
   })
 
-  test('embeddingEnabled=false → 只有 pinned facts，不呼叫 searchSimilarFacts', async () => {
+  test('embeddingEnabled=false → 只有 pinned facts，不呼叫 searchFacts', async () => {
     const { sqlite, db } = setupTestDb()
     const config = makeConfig({ embeddingEnabled: false })
     const pinnedFact = makeFact()
 
-    let searchSimilarFactsCalled = false
+    let searchFactsCalled = false
+    const fakeVectorStore = createFakeVectorStore({
+      searchFacts: (..._args: unknown[]) => {
+        searchFactsCalled = true
+        return []
+      },
+    })
     const deps: ContextDeps = {
       ...createFakeDeps(),
       getAllActiveFacts: (() => [pinnedFact]) as unknown as ContextDeps['getAllActiveFacts'],
-      searchSimilarFacts: ((..._args: unknown[]) => {
-        searchSimilarFactsCalled = true
-        return []
-      }) as unknown as ContextDeps['searchSimilarFacts'],
     }
 
     const messages = await assembleContext({
       recentMessages: [makeMessage({ userId: 'u1', content: 'Hi' })],
       config,
       db,
-      sqliteDb: sqlite,
+      vectorStore: fakeVectorStore,
       deps,
     })
 
-    expect(searchSimilarFactsCalled).toBe(false)
+    expect(searchFactsCalled).toBe(false)
     expect(messages[0].content).toContain('<group_facts>')
     expect(messages[0].content).toContain('群組每週五聚餐')
   })
@@ -458,17 +472,19 @@ describe('facts injection', () => {
       embeddingEnabled: true,
     })
 
+    const fakeVectorStore = createFakeVectorStore({
+      searchFacts: () => [{ id: 2, distance: 0.5 }],
+    })
     const deps: ContextDeps = {
       ...createFakeDeps(),
       getAllActiveFacts: (() => [pinnedFact, searchableFact]) as unknown as ContextDeps['getAllActiveFacts'],
-      searchSimilarFacts: (() => [{ factId: 2, distance: 0.5 }]) as unknown as ContextDeps['searchSimilarFacts'],
     }
 
     const messages = await assembleContext({
       recentMessages: [makeMessage({ userId: 'u1', content: 'Hi' })],
       config,
       db,
-      sqliteDb: sqlite,
+      vectorStore: fakeVectorStore,
       deps,
     })
 
@@ -503,7 +519,7 @@ describe('facts injection', () => {
       recentMessages: [makeMessage({ userId: 'u1', content: 'Hi' })],
       config,
       db,
-      sqliteDb: sqlite,
+      vectorStore: createFakeVectorStore(),
       deps,
     })
 

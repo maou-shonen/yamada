@@ -1,5 +1,6 @@
 import type { Config } from '../config/index.ts'
 import type { AgentAction } from '../lib/generator'
+import type { VectorStore } from '../storage/vector-store'
 import type { PlatformChannel, StoredMessage, UnifiedMessage } from '../types'
 import type { AgentServices } from './index'
 import { describe, expect, mock, test } from 'bun:test'
@@ -7,6 +8,17 @@ import { createTestConfig } from '../__tests__/helpers/config.ts'
 import { setupTestDb } from '../__tests__/helpers/setup-db'
 import { getFrequencyState } from '../storage/frequency-stats'
 import { Agent } from './index'
+
+function createFakeVectorStore(): VectorStore {
+  return {
+    init: () => {},
+    upsertChunkVector: () => {},
+    searchChunks: () => [],
+    upsertFactVector: () => {},
+    deleteFactVectors: () => {},
+    searchFacts: () => [],
+  }
+}
 
 function makeConfig(overrides: Partial<Config> = {}): Config {
   return createTestConfig({
@@ -123,7 +135,7 @@ describe('Agent', () => {
       groupId: 'group1',
       config: makeConfig(),
       db,
-      sqliteDb: sqlite,
+      vectorStore: createFakeVectorStore(),
       channels: new Map(),
       services,
     })
@@ -145,7 +157,7 @@ describe('Agent', () => {
       groupId: 'group1',
       config: makeConfig(),
       db,
-      sqliteDb: sqlite,
+      vectorStore: createFakeVectorStore(),
       channels: new Map(),
       services,
     })
@@ -173,7 +185,7 @@ describe('Agent', () => {
       groupId: 'group1',
       config: makeConfig(),
       db,
-      sqliteDb: sqlite,
+      vectorStore: createFakeVectorStore(),
       channels: new Map(),
       services,
     })
@@ -195,7 +207,7 @@ describe('Agent', () => {
       groupId: 'group1',
       config: makeConfig(),
       db,
-      sqliteDb: sqlite,
+      vectorStore: createFakeVectorStore(),
       channels: new Map(),
       services,
     })
@@ -217,7 +229,7 @@ describe('Agent', () => {
       groupId: 'group1',
       config: makeConfig(),
       db,
-      sqliteDb: sqlite,
+      vectorStore: createFakeVectorStore(),
       channels: new Map(),
       services,
     })
@@ -242,7 +254,7 @@ describe('Agent', () => {
       groupId: 'group1',
       config: makeConfig(),
       db,
-      sqliteDb: sqlite,
+      vectorStore: createFakeVectorStore(),
       channels: new Map(),
       services,
     })
@@ -262,7 +274,7 @@ describe('Agent', () => {
       groupId: 'group1',
       config: makeConfig(),
       db,
-      sqliteDb: sqlite,
+      vectorStore: createFakeVectorStore(),
       channels: new Map([['discord', channel]]),
       services,
     })
@@ -296,7 +308,7 @@ describe('Agent', () => {
       groupId: 'group1',
       config: makeConfig(),
       db,
-      sqliteDb: sqlite,
+      vectorStore: createFakeVectorStore(),
       channels: new Map([['discord', makeChannel()]]),
       services,
     })
@@ -330,7 +342,7 @@ describe('Agent', () => {
       groupId: 'group1',
       config: makeConfig(),
       db,
-      sqliteDb: sqlite,
+      vectorStore: createFakeVectorStore(),
       channels: new Map([['discord', makeChannel()]]),
       services,
     })
@@ -348,7 +360,7 @@ describe('Agent', () => {
       groupId: 'group1',
       config: makeConfig(),
       db,
-      sqliteDb: sqlite,
+      vectorStore: createFakeVectorStore(),
       channels: new Map([['discord', makeChannel()]]),
       services,
     })
@@ -368,7 +380,7 @@ describe('Agent', () => {
       groupId: 'group1',
       config: makeConfig(),
       db,
-      sqliteDb: sqlite,
+      vectorStore: createFakeVectorStore(),
       channels: new Map([['discord', channel]]),
       services,
     })
@@ -393,7 +405,7 @@ describe('Agent', () => {
       groupId: 'group1',
       config: makeConfig(),
       db,
-      sqliteDb: sqlite,
+      vectorStore: createFakeVectorStore(),
       channels: new Map([['discord', channel]]),
       services,
     })
@@ -421,7 +433,7 @@ describe('Agent', () => {
       groupId: 'group1',
       config: makeConfig(),
       db,
-      sqliteDb: sqlite,
+      vectorStore: createFakeVectorStore(),
       channels: new Map([['discord', channel]]),
       services,
     })
@@ -453,7 +465,7 @@ describe('Agent', () => {
       groupId: 'group1',
       config: makeConfig(),
       db,
-      sqliteDb: sqlite,
+      vectorStore: createFakeVectorStore(),
       channels: new Map([['discord', channel]]),
       services,
     })
@@ -472,7 +484,7 @@ describe('Agent', () => {
       groupId: 'group1',
       config: makeConfig(),
       db,
-      sqliteDb: sqlite,
+      vectorStore: createFakeVectorStore(),
       channels: new Map(),
       services,
     })
@@ -490,7 +502,7 @@ describe('Agent', () => {
       groupId: 'group1',
       config: makeConfig({ embeddingEnabled: false }),
       db,
-      sqliteDb: sqlite,
+      vectorStore: createFakeVectorStore(),
       channels: new Map(),
       services,
     })
@@ -508,7 +520,7 @@ describe('Agent', () => {
       groupId: 'group1',
       config: makeConfig(),
       db,
-      sqliteDb: sqlite,
+      vectorStore: createFakeVectorStore(),
       channels: new Map(), // 空 channels
       services,
     })
@@ -527,7 +539,7 @@ describe('Agent', () => {
       groupId: 'group1',
       config: makeConfig(),
       db,
-      sqliteDb: sqlite,
+      vectorStore: createFakeVectorStore(),
       channels: new Map([['line', lineChannel]]),
       services,
     })
@@ -558,7 +570,7 @@ describe('Agent', () => {
       groupId: 'group1',
       config: makeConfig({ SHUTDOWN_TIMEOUT_MS: 5000 }),
       db,
-      sqliteDb: sqlite,
+      vectorStore: createFakeVectorStore(),
       channels: new Map(),
       services,
     })
@@ -596,7 +608,7 @@ describe('Agent', () => {
       groupId: 'group1',
       config: makeConfig(),
       db,
-      sqliteDb: sqlite,
+      vectorStore: createFakeVectorStore(),
       channels: new Map(),
       services,
     })

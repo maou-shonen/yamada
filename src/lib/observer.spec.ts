@@ -1,6 +1,7 @@
 import type { Database } from 'bun:sqlite'
 import type { Config } from '../config/index.ts'
 import type { ObserverDeps } from './observer'
+import type { VectorStore } from '../storage/vector-store'
 import { describe, expect, test } from 'bun:test'
 import { createTestConfig } from '../__tests__/helpers/config.ts'
 import { setupTestDb } from '../__tests__/helpers/setup-db'
@@ -45,6 +46,17 @@ function makeConfig(threshold = 5): Config {
     OBSERVER_MESSAGE_THRESHOLD: threshold,
     OBSERVER_USER_MESSAGE_LIMIT: 50,
   })
+}
+
+function createFakeVectorStore(): VectorStore {
+  return {
+    init: () => {},
+    upsertChunkVector: () => {},
+    searchChunks: () => [],
+    upsertFactVector: () => {},
+    deleteFactVectors: () => {},
+    searchFacts: () => [],
+  }
 }
 
 function insertMessage(sqlite: Database, overrides: {
@@ -246,11 +258,12 @@ describe('runObserver', () => {
     const { sqlite, db } = setupTestDb()
     const config = makeConfig(10) // threshold = 10
     const { deps, generateCalls } = createFakeDeps()
+    const vectorStore = createFakeVectorStore()
     // 只有 2 則訊息
     insertMessage(sqlite, { content: 'm1' })
     insertMessage(sqlite, { content: 'm2' })
 
-    await runObserver(db, sqlite, config, deps)
+    await runObserver(db, vectorStore, config, deps)
 
     expect(generateCalls.length).toBe(0)
   })
@@ -259,6 +272,7 @@ describe('runObserver', () => {
     const { sqlite, db } = setupTestDb()
     const config = makeConfig(2) // threshold = 2
     const { deps, generateCalls } = createFakeDeps()
+    const vectorStore = createFakeVectorStore()
     // fact extraction 需要 mock，否則真正呼叫 extractFacts 會失敗
     deps.extractFacts = (async () => []) as unknown as ObserverDeps['extractFacts']
     deps.processNewFactEmbeddings = (async () => {}) as unknown as ObserverDeps['processNewFactEmbeddings']
@@ -266,7 +280,7 @@ describe('runObserver', () => {
     insertMessage(sqlite, { userId: 'u1', content: 'hello' })
     insertMessage(sqlite, { userId: 'u2', content: 'world' })
 
-    await runObserver(db, sqlite, config, deps)
+    await runObserver(db, vectorStore, config, deps)
 
     // 3 次 LLM 呼叫：1 group summary + 2 user summaries
     expect(generateCalls.length).toBe(3)
@@ -282,13 +296,14 @@ describe('runObserver', () => {
     const { sqlite, db } = setupTestDb()
     const config = makeConfig(1)
     const { deps, generateCalls } = createFakeDeps()
+    const vectorStore = createFakeVectorStore()
     deps.extractFacts = (async () => []) as unknown as ObserverDeps['extractFacts']
     deps.processNewFactEmbeddings = (async () => {}) as unknown as ObserverDeps['processNewFactEmbeddings']
 
     insertMessage(sqlite, { userId: 'u1', isBot: false, content: 'user msg' })
     insertMessage(sqlite, { userId: 'bot', isBot: true, content: 'bot msg' })
 
-    await runObserver(db, sqlite, config, deps)
+    await runObserver(db, vectorStore, config, deps)
 
     // 只有 u1 是非 bot，所以 2 次 LLM 呼叫：1 group + 1 user (u1)
     expect(generateCalls.length).toBe(2)
@@ -303,6 +318,7 @@ describe('runObserver', () => {
     const { sqlite, db } = setupTestDb()
     const config = makeConfig(2) // threshold = 2
     const { deps, generateCalls } = createFakeDeps()
+    const vectorStore = createFakeVectorStore()
     deps.extractFacts = (async () => []) as unknown as ObserverDeps['extractFacts']
     deps.processNewFactEmbeddings = (async () => {}) as unknown as ObserverDeps['processNewFactEmbeddings']
 
@@ -310,7 +326,7 @@ describe('runObserver', () => {
     insertMessage(sqlite, { userId: 'bot', isBot: true, content: 'bot msg 1' })
     insertMessage(sqlite, { userId: 'bot', isBot: true, content: 'bot msg 2' })
 
-    await runObserver(db, sqlite, config, deps)
+    await runObserver(db, vectorStore, config, deps)
 
     // 只有 1 次 group summary LLM 呼叫，無 user summaries
     expect(generateCalls.length).toBe(1)
@@ -347,8 +363,9 @@ describe('fact extraction integration', () => {
       },
       processNewFactEmbeddings: (async () => {}) as unknown as ObserverDeps['processNewFactEmbeddings'],
     }
+    const vectorStore = createFakeVectorStore()
 
-    await runObserver(db, sqlite, config, testDeps)
+    await runObserver(db, vectorStore, config, testDeps)
 
     expect(upsertFactCalled).toBe(true)
     expect(setFactWatermarkCalled).toBe(true)
@@ -372,8 +389,9 @@ describe('fact extraction integration', () => {
       },
       processNewFactEmbeddings: (async () => {}) as unknown as ObserverDeps['processNewFactEmbeddings'],
     }
+    const vectorStore = createFakeVectorStore()
 
-    await runObserver(db, sqlite, config, testDeps)
+    await runObserver(db, vectorStore, config, testDeps)
 
     // extractFacts 拋錯 → try block 中的 setFactWatermark 不被呼叫
     expect(setFactWatermarkCalled).toBe(false)

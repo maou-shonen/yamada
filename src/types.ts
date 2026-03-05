@@ -33,7 +33,7 @@ export interface PlatformChannel {
  * WHY: SQLite 原生儲存整數；在邊界層轉換保持 DB 層簡潔，避免序列化/反序列化開銷
  * NOTE: groupId 已移除——per-group DB 本身就是隔離單位，不需要 group_id 欄位
  *
- * id: number — SQLite INTEGER PRIMARY KEY AUTOINCREMENT，也是 sqlite-vec rowid
+ * id: number — SQLite INTEGER PRIMARY KEY AUTOINCREMENT，也是向量索引的 rowid
  * externalId: string | null — 平台訊息 ID（Discord snowflake / LINE message ID），bot 訊息為 null
  */
 export interface StoredMessage {

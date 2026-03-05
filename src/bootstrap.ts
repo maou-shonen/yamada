@@ -51,7 +51,7 @@ export interface BootstrapOptions {
 export async function bootstrap(config: Config, options?: BootstrapOptions): Promise<AppContext> {
   const dbDir = options?.dbDir ?? config.DB_DIR
   log.withMetadata({ dbDir }).info('Initializing GroupDbManager...')
-  const manager = new GroupDbManager(dbDir)
+  const manager = new GroupDbManager(dbDir, config.EMBEDDING_DIMENSIONS)
 
   // 確保 data/ 及 data/groups/ 目錄存在（recursive 會一次建立完整路徑）
   mkdirSync(dbDir, { recursive: true })
@@ -74,13 +74,13 @@ export async function bootstrap(config: Config, options?: BootstrapOptions): Pro
   })
 
   function createAgent(groupId: string): Agent {
-    const { db, sqlite: sqliteDb } = manager.getOrCreate(groupId)
+    const { db, vectorStore } = manager.getOrCreate(groupId)
 
     const agent = new Agent({
       groupId,
       config,
       db,
-      sqliteDb,
+      vectorStore,
       channels,
       services: options?.agentServices,
     })

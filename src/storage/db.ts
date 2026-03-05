@@ -1,16 +1,19 @@
 import type { BunSQLiteDatabase } from 'drizzle-orm/bun-sqlite'
+import type { VectorStore } from './vector-store'
 import { existsSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { Database } from 'bun:sqlite'
 import { drizzle } from 'drizzle-orm/bun-sqlite'
 import { log } from '../logger'
 import * as schema from './schema'
+import { SqliteVectorStore } from './sqlite-vector-store'
 
 export type DB = BunSQLiteDatabase<typeof schema>
 
 export interface GroupDb {
   db: DB
   sqlite: Database
+  vectorStore: VectorStore
 }
 
 const dbLog = log.withPrefix('[DB]')
@@ -21,7 +24,7 @@ const dbLog = log.withPrefix('[DB]')
  */
 const SAFE_GROUP_ID_REGEX = /^[\w-]+$/
 
-export function openGroupDb(dbDir: string, groupId: string): GroupDb {
+export function openGroupDb(dbDir: string, groupId: string, dimensions: number): GroupDb {
   if (!SAFE_GROUP_ID_REGEX.test(groupId)) {
     throw new Error(`Invalid groupId "${groupId}" — must contain only alphanumeric characters, underscores, and hyphens`)
   }
@@ -51,7 +54,11 @@ export function openGroupDb(dbDir: string, groupId: string): GroupDb {
   initSchema(sqlite)
 
   const db = drizzle(sqlite, { schema })
-  return { db, sqlite }
+
+  const vectorStore = new SqliteVectorStore(sqlite)
+  vectorStore.init(dimensions)
+
+  return { db, sqlite, vectorStore }
 }
 
 /**
@@ -124,6 +131,19 @@ export function initSchema(sqlite: Database): void {
   catch {
     // 若表不存在或已刪除，略過
   }
+  // 移除舊的 sqlite-vec 虛擬表（已由 SqliteVectorStore 管理）
+  try {
+    sqlite.exec(`DROP TABLE IF EXISTS chunk_vectors`)
+  }
+  catch {
+    // 若表不存在或已刪除，略過
+  }
+  try {
+    sqlite.exec(`DROP TABLE IF EXISTS fact_vectors`)
+  }
+  catch {
+    // 若表不存在或已刪除，略過
+  }
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS frequency_state (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -176,9 +196,11 @@ export function initSchema(sqlite: Database): void {
 export class GroupDbManager {
   private readonly cache = new Map<string, GroupDb>()
   private readonly dbDir: string
+  private readonly dimensions: number
 
-  constructor(dbDir: string) {
+  constructor(dbDir: string, dimensions: number) {
     this.dbDir = dbDir
+    this.dimensions = dimensions
   }
 
   /**
@@ -191,7 +213,7 @@ export class GroupDbManager {
       return existing
     }
 
-    const groupDb = openGroupDb(this.dbDir, groupId)
+    const groupDb = openGroupDb(this.dbDir, groupId, this.dimensions)
     this.cache.set(groupId, groupDb)
     dbLog.withMetadata({ groupId }).info('Created new group DB')
     return groupDb
