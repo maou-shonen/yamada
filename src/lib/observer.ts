@@ -243,7 +243,7 @@ async function runFactExtraction(
       userId: f.userId !== null ? userMask.mask(f.userId) : null,
     }))
 
-    const results = await deps.extractFacts(factMessages, maskedExistingFacts, config, userMask)
+    const results = await deps.extractFacts(factMessages, maskedExistingFacts, config, userMask, {}, groupId)
 
     for (const result of results) {
       if (result.action === 'supersede' && result.targetFactId !== undefined)

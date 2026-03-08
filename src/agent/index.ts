@@ -287,7 +287,7 @@ export class Agent {
 
     this.log.info('Calling LLM API...')
     const llmStart = Date.now()
-    const { actions, usage } = await this.services.generateReply(contextMessages, this.config)
+    const { actions, usage } = await this.services.generateReply(contextMessages, this.config, undefined, this.groupId)
     const llmDuration = Date.now() - llmStart
     this.log
       .withMetadata({

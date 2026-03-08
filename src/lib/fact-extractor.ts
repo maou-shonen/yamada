@@ -6,6 +6,7 @@ import { z } from 'zod'
 import { buildFactExtractionPrompt } from '../prompts/facts.ts'
 import { generateWithFallback } from './llm-utils.ts'
 import { createModelFromId, parseModelList } from './provider.ts'
+import { logAiRequest } from './ai-logger.ts'
 
 interface FactMessage {
   userId: string
@@ -92,23 +93,56 @@ async function callFactExtractionLlm(
   models: ReturnType<typeof parseModelList>,
   config: Config,
   deps: FactExtractorDeps,
+  groupId?: string,
 ): Promise<FactExtractionResult[]> {
   for (const { provider, modelName } of models) {
     const modelId = `${provider}/${modelName}`
+    const attemptStart = Date.now()
     try {
-      const { object } = await deps.generateObject({
+      const result = await deps.generateObject({
         model: deps.createModel(modelId, config),
         schema: factExtractionArraySchema,
         prompt,
       })
-      return object
+      logAiRequest({
+        callType: 'fact-extraction',
+        groupId: groupId ?? 'unknown',
+        model: modelId,
+        durationMs: Date.now() - attemptStart,
+        input: prompt,
+        output: { factCount: result.object.length, facts: result.object },
+        usage: {
+          inputTokens: result.usage?.inputTokens ?? null,
+          outputTokens: result.usage?.outputTokens ?? null,
+          totalTokens: result.usage?.totalTokens ?? null,
+        },
+      })
+      return result.object
     }
-    catch {
+    catch (error) {
+      logAiRequest({
+        callType: 'fact-extraction',
+        groupId: groupId ?? 'unknown',
+        model: modelId,
+        durationMs: Date.now() - attemptStart,
+        input: prompt,
+        output: null,
+        error,
+      })
       continue
     }
   }
 
+  const fallbackStart = Date.now()
   const rawText = await deps.generateWithFallback(prompt, config)
+  logAiRequest({
+    callType: 'fact-extraction',
+    groupId: groupId ?? 'unknown',
+    model: 'fallback',
+    durationMs: Date.now() - fallbackStart,
+    input: prompt,
+    output: rawText,
+  })
   const parsedJson = JSON.parse(rawText)
   return factExtractionArraySchema.parse(parsedJson)
 }
@@ -162,6 +196,7 @@ export async function extractFacts(
   config: Config,
   userMask?: UserMask,
   deps: Partial<FactExtractorDeps> = {},
+  groupId?: string,
 ): Promise<FactExtractionResult[]> {
   if (messages.length === 0)
     return []
@@ -176,7 +211,7 @@ export async function extractFacts(
   const models = parseModelList(config.OBSERVER_MODEL)
 
   // ── 2) 呼叫 LLM（structured output 優先，文字 JSON 後備）──
-  const parsedResults = await callFactExtractionLlm(prompt, models, config, resolvedDeps)
+  const parsedResults = await callFactExtractionLlm(prompt, models, config, resolvedDeps, groupId)
 
   // ── 3) 正規化與驗證，必要時將 alias 還原為原始 userId ──
   const normalizedResults = normalizeAndValidateResults(parsedResults, existingFacts)

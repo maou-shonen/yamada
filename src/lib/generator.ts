@@ -4,6 +4,7 @@ import { generateText, stepCountIs, tool } from 'ai'
 import { z } from 'zod'
 import { log } from '../logger'
 import { createModelFromId, parseModelList } from './provider.ts'
+import { logAiRequest } from './ai-logger.ts'
 
 const aiLog = log.withPrefix('[AI]')
 
@@ -106,8 +107,10 @@ function createAgentTools(visionEnabled = false) {
 export async function generateReply(
   messages: ModelMessage[],
   config: Config,
-  deps: GeneratorDeps = defaultDeps,
+  deps?: GeneratorDeps,
+  groupId?: string,
 ): Promise<GenerateReplyResult> {
+  const resolvedDeps = deps ?? defaultDeps
   const models = parseModelList(config.CHAT_MODEL)
 
   let lastError: unknown
@@ -115,6 +118,7 @@ export async function generateReply(
   for (let i = 0; i < models.length; i++) {
     const { provider, modelName } = models[i]
     const fullModelId = `${provider}/${modelName}`
+    const attemptStart = Date.now()
 
     try {
       aiLog
@@ -124,8 +128,8 @@ export async function generateReply(
         })
         .info('Sending request to LLM')
 
-      const model = deps.createModel(fullModelId, config)
-      const result = await deps.generateText({
+      const model = resolvedDeps.createModel(fullModelId, config)
+      const result = await resolvedDeps.generateText({
         model,
         messages,
         tools: createAgentTools(config.visionEnabled),
@@ -175,10 +179,37 @@ export async function generateReply(
         })
         .info('LLM response received')
 
+      logAiRequest({
+        callType: 'chat',
+        groupId: groupId ?? 'unknown',
+        model: fullModelId,
+        durationMs: Date.now() - attemptStart,
+        input: messages,
+        output: { actions, actionTypes: actions.map(a => a.type) },
+        usage: {
+          inputTokens: usage.promptTokens ?? null,
+          outputTokens: usage.completionTokens ?? null,
+          totalTokens: usage.totalTokens ?? null,
+        },
+        attempt: i + 1,
+        totalAttempts: models.length,
+      })
+
       return { actions, usage }
     }
     catch (error) {
       lastError = error
+      logAiRequest({
+        callType: 'chat',
+        groupId: groupId ?? 'unknown',
+        model: fullModelId,
+        durationMs: Date.now() - attemptStart,
+        input: messages,
+        output: null,
+        error,
+        attempt: i + 1,
+        totalAttempts: models.length,
+      })
       const isLastModel = i === models.length - 1
       if (!isLastModel) {
         aiLog
