@@ -1,6 +1,6 @@
 import type { Config } from '../config/index.ts'
 import type { VectorStore } from '../storage/vector-store'
-import type { StoredMessage } from '../types'
+import type { StoredImage, StoredMessage } from '../types'
 import type { ContextDeps } from './context'
 import { describe, expect, test } from 'bun:test'
 import { createTestConfig } from '../__tests__/helpers/config.ts'
@@ -45,6 +45,22 @@ function createFakeDeps(): ContextDeps {
     getChunkContents: (() => []) as unknown as ContextDeps['getChunkContents'],
     getAliasMap: (async () => new Map()) as unknown as ContextDeps['getAliasMap'],
     getAllActiveFacts: (() => []) as unknown as ContextDeps['getAllActiveFacts'],
+    getImagesForMessages: (() => new Map()) as unknown as ContextDeps['getImagesForMessages'],
+  }
+}
+
+function makeStoredImage(overrides: Partial<StoredImage> = {}): StoredImage {
+  return {
+    id: 1,
+    groupId: 'group-a',
+    messageId: 1,
+    description: 'A cat',
+    mimeType: 'image/webp',
+    width: 256,
+    height: 256,
+    createdAt: Date.now(),
+    thumbnail: new Uint8Array([1, 2, 3]),
+    ...overrides,
   }
 }
 
@@ -347,6 +363,36 @@ describe('assembleContext', () => {
     expect(embedTextCalled).toBe(false)
     expect(messages[0].content).not.toContain('<related_history>')
   })
+
+  test('會載入圖片描述並注入近期訊息', async () => {
+    const { db } = setupTestDb()
+    const config = makeConfig({ embeddingEnabled: false })
+    const msg = makeMessage({ id: 42, userId: 'u1', content: '看看這個 [圖片]' })
+    let receivedGroupId = ''
+    let receivedMessageIds: number[] = []
+
+    const deps: ContextDeps = {
+      ...createFakeDeps(),
+      getImagesForMessages: ((_db, groupId, messageIds) => {
+        receivedGroupId = groupId
+        receivedMessageIds = messageIds
+        return new Map([[42, makeStoredImage({ messageId: 42, description: 'A cat' })]])
+      }) as ContextDeps['getImagesForMessages'],
+    }
+
+    const messages = await assembleContext({
+      recentMessages: [msg],
+      config,
+      db,
+      groupId: 'group-a',
+      vectorStore: createFakeVectorStore(),
+      deps,
+    })
+
+    expect(receivedGroupId).toBe('group-a')
+    expect(receivedMessageIds).toEqual([42])
+    expect(messages.find(message => message.role === 'user')?.content).toBe('u1: 看看這個 [圖片: A cat]')
+  })
 })
 
 describe('buildChatMessages', () => {
@@ -391,6 +437,50 @@ describe('buildChatMessages', () => {
     const result = buildChatMessages(msgs)
     expect(result.length).toBe(2)
     expect(result.every(m => m.role === 'assistant')).toBe(true)
+  })
+
+  test('有圖片描述時會把 [圖片] 替換為內嵌描述', () => {
+    const msg = makeMessage({ id: 11, userId: 'u1', content: '[圖片]' })
+    const imageMap = new Map([[11, makeStoredImage({ messageId: 11, description: 'A cat' })]])
+
+    const result = buildChatMessages([msg], new Map(), imageMap)
+
+    expect(result).toEqual([{ role: 'user', content: 'u1: [圖片: A cat]' }])
+  })
+
+  test('圖片描述尚未生成時保留 [圖片]', () => {
+    const msg = makeMessage({ id: 12, userId: 'u1', content: '[圖片]' })
+    const imageMap = new Map([[12, makeStoredImage({ messageId: 12, description: null })]])
+
+    const result = buildChatMessages([msg], new Map(), imageMap)
+
+    expect(result).toEqual([{ role: 'user', content: 'u1: [圖片]' }])
+  })
+
+  test('文字加圖片時只替換內文中的 [圖片]', () => {
+    const msg = makeMessage({ id: 13, userId: 'u1', content: '看看這個 [圖片]' })
+    const imageMap = new Map([[13, makeStoredImage({ messageId: 13, description: 'A cat' })]])
+
+    const result = buildChatMessages([msg], new Map(), imageMap)
+
+    expect(result).toEqual([{ role: 'user', content: 'u1: 看看這個 [圖片: A cat]' }])
+  })
+
+  test('未提供 imageMap 時維持原本格式', () => {
+    const msg = makeMessage({ id: 14, userId: 'u1', content: '[圖片]' })
+
+    const result = buildChatMessages([msg])
+
+    expect(result).toEqual([{ role: 'user', content: 'u1: [圖片]' }])
+  })
+
+  test('訊息不在 imageMap 時維持原本格式', () => {
+    const msg = makeMessage({ id: 15, userId: 'u1', content: '[圖片]' })
+    const imageMap = new Map([[999, makeStoredImage({ messageId: 999, description: 'A cat' })]])
+
+    const result = buildChatMessages([msg], new Map(), imageMap)
+
+    expect(result).toEqual([{ role: 'user', content: 'u1: [圖片]' }])
   })
 })
 

@@ -4,11 +4,12 @@ import type { DB } from '../storage/db'
 import type { Fact } from '../storage/facts'
 import type { SqliteVectorStore } from '../storage/sqlite-vector-store'
 import type { VectorStore } from '../storage/vector-store'
-import type { StoredMessage } from '../types'
+import type { StoredImage, StoredMessage } from '../types'
 import { log } from '../logger'
 import { getChunkContents } from '../storage/chunks'
-import { embedText } from '../storage/embedding'
+import { embedText } from './embedding'
 import { getAllActiveFacts } from '../storage/facts'
+import { getImagesForMessages } from '../storage/images'
 import { getGroupSummary, getUserSummariesForGroup } from '../storage/summaries'
 import { getAliasMap } from '../storage/user-aliases'
 import { replaceUserIdsWithAliases } from './alias-replacer'
@@ -22,6 +23,7 @@ export interface ContextDeps {
   getChunkContents: typeof getChunkContents
   getAliasMap: (db: DB, groupId: string, userIds: string[]) => Promise<Map<string, { alias: string, userName: string }>>
   getAllActiveFacts: typeof getAllActiveFacts
+  getImagesForMessages: typeof getImagesForMessages
 }
 
 const defaultDeps: ContextDeps = {
@@ -31,6 +33,7 @@ const defaultDeps: ContextDeps = {
   getChunkContents,
   getAliasMap,
   getAllActiveFacts,
+  getImagesForMessages,
 }
 
 export interface AssembleContextParams {
@@ -352,10 +355,12 @@ export async function assembleContext(params: AssembleContextParams): Promise<Mo
     })
     .info('Context assembly complete')
 
+  const imageMap = deps.getImagesForMessages(db, groupId, recentMessages.map(msg => msg.id))
+
   // ── Chat messages：合併連續同 role 訊息 ──
   // recentMessages 來自 DB DESC 排序（最新在前），LLM 需要時間正序，先 reverse。
   // 連續的非 bot 訊息合併為單一 user message，維持 user/assistant 交替結構。
-  const chatMessages = buildChatMessages([...recentMessages].reverse(), userIdToAliasMap)
+  const chatMessages = buildChatMessages([...recentMessages].reverse(), userIdToAliasMap, imageMap)
 
   return [
     { role: 'system', content: systemPrompt },
@@ -373,7 +378,11 @@ export async function assembleContext(params: AssembleContextParams): Promise<Mo
  * WHY 合併：群聊中多人連續發言是常態，若每則都獨立為 user role，
  * 會產生連續多個 user message，不符合 LLM 預期的 user/assistant 交替格式。
  */
-export function buildChatMessages(ordered: StoredMessage[], aliasMap: Map<string, string> = new Map()): ModelMessage[] {
+export function buildChatMessages(
+  ordered: StoredMessage[],
+  aliasMap: Map<string, string> = new Map(),
+  imageMap?: Map<number, StoredImage>,
+): ModelMessage[] {
   const result: ModelMessage[] = []
   let userBuffer: string[] = []
 
@@ -391,7 +400,11 @@ export function buildChatMessages(ordered: StoredMessage[], aliasMap: Map<string
     }
     else {
       const displayId = aliasMap.get(msg.userId) ?? msg.userId
-      userBuffer.push(`${displayId}: ${msg.content}`)
+      let content = msg.content
+      const storedImage = imageMap?.get(msg.id)
+      if (storedImage?.description)
+        content = content.replace('[圖片]', `[圖片: ${storedImage.description}]`)
+      userBuffer.push(`${displayId}: ${content}`)
     }
   }
   flushUserBuffer()
