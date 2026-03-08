@@ -102,14 +102,12 @@ const configSchema = z.object({
 
   /** Vision 模型 ID，格式：provider/model（逗號分隔 = fallback）；不設定則停用圖片理解功能 */
   VISION_MODEL: z.string().min(1).optional(),
-  /** 縮圖最大邊長（px），儲存用縮圖的最長邊上限 */
-  IMAGE_MAX_DIMENSION: z.coerce.number().int().positive().default(256),
+  /** 縮圖最大邊長（px），用於儲存與 AI 圖片理解 */
+  IMAGE_MAX_DIMENSION: z.coerce.number().int().positive().default(512),
   /** WebP 壓縮品質（0-100） */
   IMAGE_QUALITY: z.coerce.number().int().min(0).max(100).default(65),
   /** 下載圖片大小上限（MB），超過拒絕下載防止 OOM */
   IMAGE_MAX_DOWNLOAD_SIZE_MB: z.coerce.number().int().positive().default(20),
-  /** 描述生成用圖片最大邊長（px），ephemeral，不儲存 */
-  IMAGE_DESCRIPTION_MAX_DIMENSION: z.coerce.number().int().positive().default(512),
 
   // ── Delivery — 訊息投遞與平台限制 ──
 

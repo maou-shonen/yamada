@@ -7,12 +7,12 @@ import type { VectorStore } from '../storage/vector-store'
 import type { StoredImage, StoredMessage } from '../types'
 import { log } from '../logger'
 import { getChunkContents } from '../storage/chunks'
-import { embedText } from './embedding'
 import { getAllActiveFacts } from '../storage/facts'
 import { getImagesForMessages } from '../storage/images'
 import { getGroupSummary, getUserSummariesForGroup } from '../storage/summaries'
 import { getAliasMap } from '../storage/user-aliases'
 import { replaceUserIdsWithAliases } from './alias-replacer'
+import { embedText } from './embedding'
 
 const contextLog = log.withPrefix('[Context]')
 

@@ -4,7 +4,6 @@ import type { VectorStore } from '../storage/vector-store'
 import { and, count, eq, gt } from 'drizzle-orm'
 import { log } from '../logger'
 import { buildGroupCompressionPrompt, buildUserCompressionPrompt, formatChatHistory } from '../prompts/observer'
-import { processNewFactEmbeddings } from '../storage/embedding'
 import {
   getAllActiveFacts,
   getFactWatermark,
@@ -23,6 +22,7 @@ import {
 } from '../storage/summaries'
 import { getAliasMap } from '../storage/user-aliases'
 import { createUserMask } from './alias-replacer.ts'
+import { processNewFactEmbeddings } from './embedding'
 import { extractFacts } from './fact-extractor.ts'
 import { generateWithFallback } from './llm-utils.ts'
 

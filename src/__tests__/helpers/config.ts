@@ -57,10 +57,9 @@ export function createTestConfig(overrides: Partial<Config> = {}): Config {
 
     // ── Vision ──
     VISION_MODEL: undefined,
-    IMAGE_MAX_DIMENSION: 256,
+    IMAGE_MAX_DIMENSION: 512,
     IMAGE_QUALITY: 65,
     IMAGE_MAX_DOWNLOAD_SIZE_MB: 20,
-    IMAGE_DESCRIPTION_MAX_DIMENSION: 512,
 
     // ── Delivery ──
     DELIVERY_DISCORD_MAX_LENGTH: 2000,

@@ -1,16 +1,16 @@
 import type { EmbeddingModel } from 'ai'
 import type { Config } from '../config'
+import type { DB } from '../storage/db'
+import type { VectorStore } from '../storage/vector-store'
 import type { StoredMessage } from '../types'
-import type { DB } from './db'
-import type { VectorStore } from './vector-store'
 import { embed, embedMany } from 'ai'
 import { and, asc, eq, gte, inArray } from 'drizzle-orm'
-import { createEmbeddingModelFromId } from '../lib/provider.ts'
 import { log } from '../logger'
+import { getMaxChunkEndTimestamp, saveChunk } from '../storage/chunks'
+import { getAllActiveFacts } from '../storage/facts'
+import * as schema from '../storage/schema'
 import { buildChunks } from './chunking'
-import { getMaxChunkEndTimestamp, saveChunk } from './chunks'
-import { getAllActiveFacts } from './facts'
-import * as schema from './schema'
+import { createEmbeddingModelFromId } from './provider.ts'
 
 const embeddingLog = log.withPrefix('[Embedding]')
 

@@ -7,7 +7,7 @@ import { createTestConfig } from '../__tests__/helpers/config.ts'
 import { setupTestDb } from '../__tests__/helpers/setup-db'
 import { getDistinctUserIds, getMessagesByUser, getMessagesSince } from '../storage/messages'
 import { buildGroupCompressionPrompt } from '../prompts/observer'
-import { processNewFactEmbeddings } from '../storage/embedding'
+import { processNewFactEmbeddings } from './embedding'
 import {
   getAllActiveFacts,
   getFactWatermark,

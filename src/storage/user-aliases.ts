@@ -1,6 +1,6 @@
 import type { DB } from './db'
 import { and, eq, inArray } from 'drizzle-orm'
-import { generateAlias } from './alias-generator'
+import { generateAlias } from '../utils/alias-generator'
 import * as schema from './schema'
 
 /**

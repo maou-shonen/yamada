@@ -79,12 +79,12 @@ function createAgentTools(visionEnabled = false) {
     return {
       ...tools,
       viewImage: tool({
-      description: '查看並分析圖片的詳細內容。當你需要了解圖片的更多細節時使用（例如文字辨識、物件辨識、場景分析）。參數 imageId 來自對話中出現的圖片標記，例如 [圖片 #5: ...] 中的 5。',
-      inputSchema: z.object({
-        imageId: z.number().describe('要分析的圖片 ID'),
-        question: z.string().optional().describe('想了解圖片的什麼？不指定則做通用分析'),
-      }),
-      execute: async ({ imageId, question }) => ({ imageId, question: question ?? '' }),
+        description: '查看並分析圖片的詳細內容。當你需要了解圖片的更多細節時使用（例如文字辨識、物件辨識、場景分析）。參數 imageId 來自對話中出現的圖片標記，例如 [圖片 #5: ...] 中的 5。',
+        inputSchema: z.object({
+          imageId: z.number().describe('要分析的圖片 ID'),
+          question: z.string().optional().describe('想了解圖片的什麼？不指定則做通用分析'),
+        }),
+        execute: async ({ imageId, question }) => ({ imageId, question: question ?? '' }),
       }),
     }
   }

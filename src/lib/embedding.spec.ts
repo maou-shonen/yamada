@@ -4,8 +4,8 @@ import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
 import { createTestConfig } from '../__tests__/helpers/config.ts'
 import { setupTestDb } from '../__tests__/helpers/setup-db.ts'
 import { embedText, processNewChunks } from './embedding'
-import * as schema from './schema'
-import { SqliteVectorStore } from './sqlite-vector-store'
+import * as schema from '../storage/schema'
+import { SqliteVectorStore } from '../storage/sqlite-vector-store'
 
 /** 測試用 Config（4 維向量，簡化測試） */
 const mockConfig = createTestConfig({

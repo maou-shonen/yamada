@@ -83,13 +83,7 @@ async function defaultProcessImages(
         throw new Error('Image attachment missing url/platformImageId')
       }
 
-      const descResult = await resizeImage(
-        originalBuffer,
-        config.IMAGE_DESCRIPTION_MAX_DIMENSION,
-        config.IMAGE_QUALITY,
-      )
-
-      const storageResult = await resizeImage(
+      const resized = await resizeImage(
         originalBuffer,
         config.IMAGE_MAX_DIMENSION,
         config.IMAGE_QUALITY,
@@ -97,13 +91,13 @@ async function defaultProcessImages(
 
       const imageId = saveImage(db, groupId, {
         messageId: storedMessage.id,
-        thumbnail: storageResult.buffer,
-        mimeType: storageResult.mimeType,
-        width: storageResult.width,
-        height: storageResult.height,
+        thumbnail: resized.buffer,
+        mimeType: resized.mimeType,
+        width: resized.width,
+        height: resized.height,
       })
 
-      const description = await generateImageDescription(descResult.buffer, config)
+      const description = await generateImageDescription(resized.buffer, config)
       updateImageDescription(db, imageId, description)
     }
     catch (error) {
