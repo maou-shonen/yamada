@@ -1,6 +1,7 @@
 import type { LanguageModel } from 'ai'
-import type { Config } from '../config/index.ts'
+import type { Buffer } from 'node:buffer'
 
+import type { Config } from '../config/index.ts'
 import { generateText } from 'ai'
 
 import { log } from '../logger'

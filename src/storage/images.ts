@@ -1,5 +1,6 @@
 import type { StoredImage } from '../types'
 import type { DB } from './db'
+import { Buffer } from 'node:buffer'
 import { and, eq, inArray } from 'drizzle-orm'
 import * as schema from './schema'
 
@@ -45,7 +46,8 @@ export function getImageById(db: DB, id: number): StoredImage | null {
     .where(eq(schema.images.id, id))
     .get()
 
-  if (!row) return null
+  if (!row)
+    return null
 
   return {
     id: row.id,
@@ -74,7 +76,8 @@ export function getImageByMessageId(
     .where(and(eq(schema.images.groupId, groupId), eq(schema.images.messageId, messageId)))
     .get()
 
-  if (!row) return null
+  if (!row)
+    return null
 
   return {
     id: row.id,
@@ -97,7 +100,8 @@ export function getImagesForMessages(
   groupId: string,
   messageIds: number[],
 ): Map<number, StoredImage> {
-  if (messageIds.length === 0) return new Map()
+  if (messageIds.length === 0)
+    return new Map()
 
   const rows = db
     .select()

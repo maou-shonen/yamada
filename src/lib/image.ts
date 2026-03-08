@@ -1,3 +1,4 @@
+import { Buffer } from 'node:buffer'
 import sharp from 'sharp'
 import { log } from '../logger'
 
