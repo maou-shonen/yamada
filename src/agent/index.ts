@@ -97,7 +97,7 @@ async function defaultProcessImages(
         height: resized.height,
       })
 
-      const description = await generateImageDescription(resized.buffer, config)
+      const description = await generateImageDescription(resized.buffer, config, undefined, groupId)
       updateImageDescription(db, imageId, description)
     }
     catch (error) {

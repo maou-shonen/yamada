@@ -4,6 +4,7 @@ import type { Buffer } from 'node:buffer'
 import type { Config } from '../config/index.ts'
 import { generateText } from 'ai'
 
+import { logAiRequest } from './ai-logger.ts'
 import { log } from '../logger'
 import { createModelFromId, parseModelList } from './provider.ts'
 
@@ -27,6 +28,7 @@ async function generateVisionText(
   prompt: string,
   config: Config,
   deps: VisionDeps = defaultDeps,
+  groupId?: string,
 ): Promise<string> {
   const models = parseModelList(config.VISION_MODEL!)
 
@@ -35,6 +37,7 @@ async function generateVisionText(
   for (let i = 0; i < models.length; i++) {
     const { provider, modelName } = models[i]
     const fullModelId = `${provider}/${modelName}`
+    const attemptStart = Date.now()
 
     try {
       visionLog
@@ -64,10 +67,33 @@ async function generateVisionText(
         })
         .info('Vision response received')
 
+      logAiRequest({
+        callType: 'vision',
+        groupId: groupId ?? 'unknown',
+        model: fullModelId,
+        durationMs: Date.now() - attemptStart,
+        input: { prompt, imageByteLength: imageBuffer.byteLength },
+        output: { responseText: result.text, responseLength: result.text.length },
+        usage: {
+          inputTokens: result.usage?.inputTokens ?? null,
+          outputTokens: result.usage?.outputTokens ?? null,
+          totalTokens: result.usage?.totalTokens ?? null,
+        },
+      })
+
       return result.text
     }
     catch (error) {
       lastError = error
+      logAiRequest({
+        callType: 'vision',
+        groupId: groupId ?? 'unknown',
+        model: fullModelId,
+        durationMs: Date.now() - attemptStart,
+        input: { prompt, imageByteLength: imageBuffer.byteLength },
+        output: null,
+        error,
+      })
       const isLastModel = i === models.length - 1
       if (!isLastModel) {
         visionLog
@@ -84,8 +110,9 @@ export async function generateImageDescription(
   imageBuffer: Buffer,
   config: Config,
   deps: VisionDeps = defaultDeps,
+  groupId?: string,
 ): Promise<string> {
-  return generateVisionText(imageBuffer, DESCRIPTION_PROMPT, config, deps)
+  return generateVisionText(imageBuffer, DESCRIPTION_PROMPT, config, deps, groupId)
 }
 
 export async function analyzeImage(
@@ -93,11 +120,13 @@ export async function analyzeImage(
   question: string,
   config: Config,
   deps: VisionDeps = defaultDeps,
+  groupId?: string,
 ): Promise<string> {
   return generateVisionText(
     imageBuffer,
     question.trim() || DEFAULT_ANALYSIS_PROMPT,
     config,
     deps,
+    groupId,
   )
 }

@@ -25,6 +25,7 @@ import { createUserMask } from './alias-replacer.ts'
 import { processNewFactEmbeddings } from './embedding'
 import { extractFacts } from './fact-extractor.ts'
 import { generateWithFallback } from './llm-utils.ts'
+import { logAiRequest } from './ai-logger.ts'
 
 const observerLog = log.withPrefix('[Observer]')
 
@@ -150,7 +151,16 @@ export async function compressGroupSummary(
   const historyText = formatChatHistory(messages, aliasMap)
   const prompt = buildGroupCompressionPrompt(existingSummary, historyText, pinnedFacts)
 
+  const groupStart = Date.now()
   const text = await deps.generateWithFallback(prompt, config)
+  logAiRequest({
+    callType: 'observer-group',
+    groupId,
+    model: config.OBSERVER_MODEL,
+    durationMs: Date.now() - groupStart,
+    input: { prompt, promptLength: prompt.length },
+    output: { summaryText: text, summaryLength: text.length },
+  })
 
   await deps.upsertGroupSummary(db, groupId, text)
   observerLog.withMetadata({ summaryLength: text.length }).info('Group summary compressed')
@@ -188,7 +198,16 @@ export async function compressUserSummaries(
     const messagesText = messages.map(m => m.content).join('\n')
     const prompt = buildUserCompressionPrompt(existingSummary, messagesText, pinnedFacts)
 
+    const userStart = Date.now()
     const text = await deps.generateWithFallback(prompt, config)
+    logAiRequest({
+      callType: 'observer-user',
+      groupId,
+      model: config.OBSERVER_MODEL,
+      durationMs: Date.now() - userStart,
+      input: { prompt, promptLength: prompt.length, userId },
+      output: { summaryText: text, summaryLength: text.length },
+    })
 
     await deps.upsertUserSummary(db, groupId, userId, text)
     observerLog.withMetadata({ userId, summaryLength: text.length }).debug('User summary compressed')
