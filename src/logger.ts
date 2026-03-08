@@ -48,3 +48,23 @@ export function createLogger(config: LoggingConfig = DEFAULT_LOGGING): LogLayer 
  * 啟動後可透過 createLogger(config.logging) 建立使用自訂設定的實例
  */
 export const log = createLogger()
+
+/** 建立只有 file transport 的 AI 請求 logger（不含 terminal 輸出） */
+export function createAiLogger(config: LoggingConfig = DEFAULT_LOGGING): LogLayer {
+  return new LogLayer({
+    errorSerializer: serializeError,
+    transport: [
+      new LogFileRotationTransport({
+        filename: `${config.dir}/ai-%DATE%.log`,
+        frequency: config.rotationFrequency,
+        dateFormat: 'YMD',
+        size: config.maxSize,
+        maxLogs: config.maxRetention,
+        compressOnRotate: true,
+        auditFile: `${config.dir}/ai-audit.json`,
+      }),
+    ],
+  })
+}
+
+export const aiLog = createAiLogger()
