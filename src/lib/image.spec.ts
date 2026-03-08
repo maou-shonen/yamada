@@ -1,8 +1,6 @@
-import { afterEach, describe, expect, mock, test } from 'bun:test'
+import { describe, expect, mock, test } from 'bun:test'
 import sharp from 'sharp'
 import { downloadImage, resizeImage } from './image'
-
-const originalFetch = globalThis.fetch
 
 async function createPngBuffer(width: number, height: number): Promise<Buffer> {
   return sharp({
@@ -14,10 +12,6 @@ async function createPngBuffer(width: number, height: number): Promise<Buffer> {
     },
   }).png().toBuffer()
 }
-
-afterEach(() => {
-  globalThis.fetch = originalFetch
-})
 
 describe('resizeImage', () => {
   test('preserves aspect ratio when resizing', async () => {
@@ -49,10 +43,9 @@ describe('downloadImage', () => {
       status: 200,
       headers: { 'content-length': String(2 * 1024 * 1024) },
     })))
-    globalThis.fetch = mockFetch as unknown as typeof fetch
 
     try {
-      await downloadImage('https://example.com/image.png', 1)
+      await downloadImage('https://example.com/image.png', 1, { fetch: mockFetch as unknown as typeof fetch })
       throw new Error('Expected downloadImage to reject oversized downloads')
     }
     catch (error) {

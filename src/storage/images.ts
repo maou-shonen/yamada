@@ -39,11 +39,11 @@ export function saveImage(
 /**
  * 根據圖片 ID 取得圖片記錄
  */
-export function getImageById(db: DB, id: number): StoredImage | null {
+export function getImageById(db: DB, groupId: string, id: number): StoredImage | null {
   const row = db
     .select()
     .from(schema.images)
-    .where(eq(schema.images.id, id))
+    .where(and(eq(schema.images.id, id), eq(schema.images.groupId, groupId)))
     .get()
 
   if (!row)

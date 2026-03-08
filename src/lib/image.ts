@@ -4,15 +4,23 @@ import { log } from '../logger'
 
 const imageLog = log.withPrefix('[Image]')
 
+export interface ImageDeps {
+  fetch: typeof globalThis.fetch
+}
+
+const defaultImageDeps: ImageDeps = {
+  fetch: globalThis.fetch,
+}
+
 function toError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error))
 }
 
-export async function downloadImage(url: string, maxSizeMB: number): Promise<Buffer> {
+export async function downloadImage(url: string, maxSizeMB: number, deps: ImageDeps = defaultImageDeps): Promise<Buffer> {
   const maxBytes = maxSizeMB * 1024 * 1024
 
   try {
-    const response = await fetch(url, { signal: AbortSignal.timeout(30000) })
+    const response = await deps.fetch(url, { signal: AbortSignal.timeout(30000) })
     if (!response.ok)
       throw new Error(`Download failed: ${response.status} ${response.statusText}`)
 
@@ -48,7 +56,7 @@ export async function resizeImage(
   mimeType: string
 }> {
   try {
-    const resized = await sharp(buffer)
+    const resized = await sharp(buffer, { limitInputPixels: 268402689 })
       .resize(maxDimension, maxDimension, { fit: 'inside', withoutEnlargement: true })
       .webp({ quality })
       .toBuffer({ resolveWithObject: true })

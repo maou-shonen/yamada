@@ -42,7 +42,7 @@ test('getImageById - 根據 ID 取得圖片', () => {
     thumbnail,
   })
 
-  const image = getImageById(db, id)
+  const image = getImageById(db, 'group-a', id)
   expect(image).not.toBeNull()
   expect(image?.id).toBe(id)
   expect(image?.groupId).toBe('group-a')
@@ -58,7 +58,22 @@ test('getImageById - 根據 ID 取得圖片', () => {
 test('getImageById - 不存在的 ID 回傳 null', () => {
   const { db } = makeDb()
 
-  const image = getImageById(db, 9999)
+  const image = getImageById(db, 'group-a', 9999)
+  expect(image).toBeNull()
+})
+
+test('getImageById - 不同群組的圖片不可見', () => {
+  const { db } = makeDb()
+
+  const id = saveImage(db, 'group-a', {
+    messageId: 1,
+    mimeType: 'image/webp',
+    width: 256,
+    height: 256,
+    thumbnail: createTestThumbnail(50),
+  })
+
+  const image = getImageById(db, 'group-b', id)
   expect(image).toBeNull()
 })
 
@@ -206,13 +221,13 @@ test('updateImageDescription - 更新圖片描述', () => {
   })
 
   // 初始描述為 null
-  let image = getImageById(db, id)
+  let image = getImageById(db, 'group-a', id)
   expect(image?.description).toBeNull()
 
   // 更新描述
   updateImageDescription(db, id, 'A beautiful sunset')
 
-  image = getImageById(db, id)
+  image = getImageById(db, 'group-a', id)
   expect(image?.description).toBe('A beautiful sunset')
 })
 
@@ -228,12 +243,12 @@ test('updateImageDescription - 更新已有描述的圖片', () => {
   })
 
   updateImageDescription(db, id, 'First description')
-  let image = getImageById(db, id)
+  let image = getImageById(db, 'group-a', id)
   expect(image?.description).toBe('First description')
 
   // 更新為新描述
   updateImageDescription(db, id, 'Updated description')
-  image = getImageById(db, id)
+  image = getImageById(db, 'group-a', id)
   expect(image?.description).toBe('Updated description')
 })
 
@@ -258,7 +273,7 @@ test('thumbnail 精度 - Uint8Array 往返', () => {
     thumbnail: originalThumbnail,
   })
 
-  const image = getImageById(db, id)
+  const image = getImageById(db, 'group-a', id)
   expect(image?.thumbnail).toEqual(originalThumbnail)
 })
 
@@ -275,7 +290,7 @@ test('createdAt 自動設定 - 時間戳精度', () => {
   })
 
   const afterSave = Date.now()
-  const image = getImageById(db, id)
+  const image = getImageById(db, 'group-a', id)
 
   expect(image?.createdAt).toBeGreaterThanOrEqual(beforeSave)
   expect(image?.createdAt).toBeLessThanOrEqual(afterSave)
@@ -309,11 +324,11 @@ test('混合操作 - 儲存、查詢、更新', () => {
   updateImageDescription(db, id1, 'First image')
 
   // 驗證更新
-  const updated = getImageById(db, id1)
+  const updated = getImageById(db, 'group-a', id1)
   expect(updated?.description).toBe('First image')
 
   // 驗證第二個圖片未受影響
-  const unchanged = getImageById(db, id2)
+  const unchanged = getImageById(db, 'group-a', id2)
   expect(unchanged?.description).toBeNull()
 })
 
@@ -328,7 +343,7 @@ test('mimeType 預設值 - image/webp', () => {
     thumbnail: createTestThumbnail(50),
   })
 
-  const image = getImageById(db, id)
+  const image = getImageById(db, 'group-a', id)
   expect(image?.mimeType).toBe('image/webp')
 })
 

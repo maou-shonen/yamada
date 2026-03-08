@@ -36,7 +36,7 @@ export interface AgentServices {
   recordActivity: typeof recordActivity
   checkFrequency: typeof checkFrequency
   analyzeImage: (thumbnail: Buffer, question: string, config: Config) => Promise<string>
-  getImageById: (db: DB, id: number) => StoredImage | null
+  getImageById: (db: DB, groupId: string, id: number) => StoredImage | null
   getOrCreateAlias: (db: DB, groupId: string, userId: string, userName: string) => Promise<{ alias: string, userName: string }>
   getAliasMap: (db: DB, groupId: string, userIds: string[]) => Promise<Map<string, { alias: string, userName: string }>>
   processImages?: (message: UnifiedMessage, db: DB, groupId: string, config: Config) => Promise<void>
@@ -118,7 +118,7 @@ const defaultServices: AgentServices = {
   processNewChunks,
   recordActivity,
   checkFrequency,
-  analyzeImage: (thumbnail, question, config) => visionAnalyzeImage(Buffer.from(thumbnail), question, config),
+  analyzeImage: (thumbnail, question, config) => visionAnalyzeImage(thumbnail, question, config),
   getImageById: storageGetImageById,
   getOrCreateAlias,
   getAliasMap,
@@ -371,7 +371,7 @@ export class Agent {
           break
         }
         case 'viewImage': {
-          const storedImage = this.services.getImageById(this.db, action.imageId)
+          const storedImage = this.services.getImageById(this.db, this.groupId, action.imageId)
           if (!storedImage) {
             this.log.withMetadata({ imageId: action.imageId }).warn('viewImage: image not found')
             break
@@ -391,6 +391,8 @@ export class Agent {
                 config: this.config,
               })
             }
+
+            this.services.saveBotMessage(this.db, this.groupId, analysis, this.config.BOT_USER_ID)
           }
           catch (err) {
             this.log.withError(err).warn('viewImage analysis failed')

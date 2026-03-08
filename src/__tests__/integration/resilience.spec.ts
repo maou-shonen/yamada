@@ -104,7 +104,7 @@ function createResilienceServices(overrides: Partial<AgentServices> = {}): Agent
       },
     })) as unknown) as AgentServices['checkFrequency'],
     analyzeImage: (mock(async () => 'mock image analysis') as unknown) as AgentServices['analyzeImage'],
-    getImageById: (mock(() => null) as unknown) as AgentServices['getImageById'],
+    getImageById: (mock((_db, _groupId, _id) => null) as unknown) as AgentServices['getImageById'],
     getOrCreateAlias,
     getAliasMap,
     ...overrides,

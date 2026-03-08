@@ -613,12 +613,12 @@ describe('Agent', () => {
 
     await agent.processTriggeredMessages('discord', false)
 
-    expect(mocks.getImageByIdMock).toHaveBeenCalledWith(expect.anything(), 5)
+    expect(mocks.getImageByIdMock).toHaveBeenCalledWith(expect.anything(), 'group1', 5)
     expect(mocks.analyzeImageMock).toHaveBeenCalledWith(expect.any(Buffer), '圖裡有什麼？', expect.anything())
     expect(mocks.deliverReplyMock).toHaveBeenCalledWith(
       expect.objectContaining({ content: '這是一隻坐在窗邊的貓。', platform: 'discord' }),
     )
-    expect(mocks.saveBotMessageMock.mock.calls.length).toBe(0)
+    expect(mocks.saveBotMessageMock).toHaveBeenCalledWith(expect.anything(), 'group1', '這是一隻坐在窗邊的貓。', 'bot')
   })
 
   test('viewImage 找不到圖片時不崩潰且不呼叫 analyzeImage', async () => {
@@ -641,7 +641,7 @@ describe('Agent', () => {
 
     await agent.processTriggeredMessages('discord', false)
 
-    expect(mocks.getImageByIdMock).toHaveBeenCalledWith(expect.anything(), 999)
+    expect(mocks.getImageByIdMock).toHaveBeenCalledWith(expect.anything(), 'group1', 999)
     expect(mocks.analyzeImageMock.mock.calls.length).toBe(0)
     expect(mocks.deliverReplyMock.mock.calls.length).toBe(0)
   })
@@ -764,8 +764,6 @@ describe('Agent', () => {
 
     expect(mocks.generateReplyMock.mock.calls.length).toBe(1)
   })
-})
-
   test('receiveMessage → alias upsert 失敗不阻塞訊息管線', async () => {
     const { sqlite, db } = setupTestDb()
     const { services, mocks } = createFakeServices()
@@ -790,3 +788,4 @@ describe('Agent', () => {
     // recordActivity 應該仍然被呼叫
     expect(mocks.recordActivityMock.mock.calls.length).toBe(1)
   })
+})

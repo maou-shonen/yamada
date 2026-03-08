@@ -83,7 +83,7 @@ export interface ImageAttachment {
  *
  * id: number — SQLite INTEGER PRIMARY KEY AUTOINCREMENT
  * messageId: number — 外鍵 → messages.id
- * thumbnail: 縮圖 BLOB（~256px WebP，< 50KB）
+ * thumbnail: 縮圖 BLOB（≤512px WebP）
  * description: AI 生成的精簡描述（null 表示尚未生成）
  */
 export interface StoredImage {
