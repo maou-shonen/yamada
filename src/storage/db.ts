@@ -197,6 +197,20 @@ export function initSchema(sqlite: Database): void {
   sqlite.exec(`CREATE UNIQUE INDEX IF NOT EXISTS facts_canonical_key_unique ON facts(group_id, canonical_key, scope, COALESCE(user_id, '')) WHERE status = 'active'`)
   sqlite.exec(`CREATE INDEX IF NOT EXISTS facts_scope_user_status_idx ON facts(group_id, scope, user_id, status)`)
   sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS images (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      group_id TEXT NOT NULL,
+      message_id INTEGER NOT NULL,
+      description TEXT,
+      mime_type TEXT NOT NULL DEFAULT 'image/webp',
+      width INTEGER NOT NULL,
+      height INTEGER NOT NULL,
+      created_at INTEGER NOT NULL,
+      thumbnail BLOB NOT NULL
+    )
+  `)
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS images_message_idx ON images(group_id, message_id)`)
+  sqlite.exec(`
     CREATE TABLE IF NOT EXISTS fact_metadata (
       group_id TEXT NOT NULL,
       key TEXT NOT NULL,

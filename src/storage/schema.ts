@@ -1,4 +1,4 @@
-import { index, integer, primaryKey, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core'
+import { blob, index, integer, primaryKey, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core'
 
 /**
  * 訊息表 - 儲存所有群組的訊息
@@ -176,6 +176,29 @@ export const factMetadata = sqliteTable(
   },
   table => ({
     pk: primaryKey({ columns: [table.groupId, table.key] }),
+  }),
+)
+
+/**
+ * 圖片表 - 儲存訊息中的圖片縮圖與元資料
+ * thumbnail: BLOB（WebP 縮圖，< 50KB）
+ * description: AI 生成的精簡描述（null 表示尚未生成）
+ */
+export const images = sqliteTable(
+  'images',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    groupId: text('group_id').notNull(),
+    messageId: integer('message_id').notNull(),
+    description: text('description'),
+    mimeType: text('mime_type').notNull().default('image/webp'),
+    width: integer('width').notNull(),
+    height: integer('height').notNull(),
+    createdAt: integer('created_at').notNull(),
+    thumbnail: blob('thumbnail', { mode: 'buffer' }).notNull(),
+  },
+  table => ({
+    messageIdx: index('images_message_idx').on(table.groupId, table.messageId),
   }),
 )
 
