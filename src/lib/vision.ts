@@ -4,8 +4,8 @@ import type { Buffer } from 'node:buffer'
 import type { Config } from '../config/index.ts'
 import { generateText } from 'ai'
 
-import { logAiRequest } from './ai-logger.ts'
 import { log } from '../logger'
+import { logAiRequest } from './ai-logger.ts'
 import { createModelFromId, parseModelList } from './provider.ts'
 
 const visionLog = log.withPrefix('[Vision]')

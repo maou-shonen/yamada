@@ -21,11 +21,11 @@ import {
   upsertUserSummary,
 } from '../storage/summaries'
 import { getAliasMap } from '../storage/user-aliases'
+import { logAiRequest } from './ai-logger.ts'
 import { createUserMask } from './alias-replacer.ts'
 import { processNewFactEmbeddings } from './embedding'
 import { extractFacts } from './fact-extractor.ts'
 import { generateWithFallback } from './llm-utils.ts'
-import { logAiRequest } from './ai-logger.ts'
 
 const observerLog = log.withPrefix('[Observer]')
 

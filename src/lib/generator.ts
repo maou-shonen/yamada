@@ -3,8 +3,8 @@ import type { Config } from '../config/index.ts'
 import { generateText, stepCountIs, tool } from 'ai'
 import { z } from 'zod'
 import { log } from '../logger'
-import { createModelFromId, parseModelList } from './provider.ts'
 import { logAiRequest } from './ai-logger.ts'
+import { createModelFromId, parseModelList } from './provider.ts'
 
 const aiLog = log.withPrefix('[AI]')
 

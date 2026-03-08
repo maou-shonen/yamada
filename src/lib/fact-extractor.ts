@@ -4,9 +4,9 @@ import type { UserMask } from './alias-replacer.ts'
 import { generateObject } from 'ai'
 import { z } from 'zod'
 import { buildFactExtractionPrompt } from '../prompts/facts.ts'
+import { logAiRequest } from './ai-logger.ts'
 import { generateWithFallback } from './llm-utils.ts'
 import { createModelFromId, parseModelList } from './provider.ts'
-import { logAiRequest } from './ai-logger.ts'
 
 interface FactMessage {
   userId: string

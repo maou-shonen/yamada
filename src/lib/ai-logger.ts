@@ -1,4 +1,5 @@
 import type { LogLayer } from 'loglayer'
+import { Buffer } from 'node:buffer'
 import { aiLog as defaultAiLog } from '../logger'
 
 export interface AiLogEntry {
