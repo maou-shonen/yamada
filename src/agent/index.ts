@@ -4,6 +4,7 @@ import type { VectorStore } from '../storage/vector-store'
 import type { PlatformChannel, StoredImage, UnifiedMessage } from '../types'
 import { Buffer } from 'node:buffer'
 import { and, desc, eq } from 'drizzle-orm'
+import { logAiRequest } from '../lib/ai-logger.ts'
 import { replaceAliasesWithNames } from '../lib/alias-replacer'
 import { assembleContext } from '../lib/context'
 import { deliverReaction, deliverReply } from '../lib/delivery'
@@ -376,12 +377,19 @@ export class Agent {
             this.log.withMetadata({ imageId: action.imageId }).warn('viewImage: image not found')
             break
           }
+          const thumbnail = Buffer.from(storedImage.thumbnail)
+          const question = action.question ?? ''
+          const viewImageStart = Date.now()
           try {
-            const analysis = await this.services.analyzeImage(
-              Buffer.from(storedImage.thumbnail),
-              action.question ?? '',
-              this.config,
-            )
+            const analysis = await this.services.analyzeImage(thumbnail, question, this.config)
+            logAiRequest({
+              callType: 'vision',
+              groupId: this.groupId,
+              model: this.config.VISION_MODEL ?? 'unknown',
+              durationMs: Date.now() - viewImageStart,
+              input: { prompt: question, imageByteLength: thumbnail.byteLength },
+              output: { responseText: analysis, responseLength: analysis.length },
+            })
             if (channel) {
               await this.services.deliverReply({
                 channel,
@@ -395,6 +403,15 @@ export class Agent {
             this.services.saveBotMessage(this.db, this.groupId, analysis, this.config.BOT_USER_ID)
           }
           catch (err) {
+            logAiRequest({
+              callType: 'vision',
+              groupId: this.groupId,
+              model: this.config.VISION_MODEL ?? 'unknown',
+              durationMs: Date.now() - viewImageStart,
+              input: { prompt: question, imageByteLength: thumbnail.byteLength },
+              output: null,
+              error: err,
+            })
             this.log.withError(err).warn('viewImage analysis failed')
           }
           break

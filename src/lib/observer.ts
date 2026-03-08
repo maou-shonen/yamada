@@ -152,15 +152,30 @@ export async function compressGroupSummary(
   const prompt = buildGroupCompressionPrompt(existingSummary, historyText, pinnedFacts)
 
   const groupStart = Date.now()
-  const text = await deps.generateWithFallback(prompt, config)
-  logAiRequest({
-    callType: 'observer-group',
-    groupId,
-    model: config.OBSERVER_MODEL,
-    durationMs: Date.now() - groupStart,
-    input: { prompt, promptLength: prompt.length },
-    output: { summaryText: text, summaryLength: text.length },
-  })
+  let text: string
+  try {
+    text = await deps.generateWithFallback(prompt, config)
+    logAiRequest({
+      callType: 'observer-group',
+      groupId,
+      model: config.OBSERVER_MODEL,
+      durationMs: Date.now() - groupStart,
+      input: { prompt, promptLength: prompt.length },
+      output: { summaryText: text, summaryLength: text.length },
+    })
+  }
+  catch (error) {
+    logAiRequest({
+      callType: 'observer-group',
+      groupId,
+      model: config.OBSERVER_MODEL,
+      durationMs: Date.now() - groupStart,
+      input: { prompt, promptLength: prompt.length },
+      output: null,
+      error,
+    })
+    throw error
+  }
 
   await deps.upsertGroupSummary(db, groupId, text)
   observerLog.withMetadata({ summaryLength: text.length }).info('Group summary compressed')
@@ -199,15 +214,30 @@ export async function compressUserSummaries(
     const prompt = buildUserCompressionPrompt(existingSummary, messagesText, pinnedFacts)
 
     const userStart = Date.now()
-    const text = await deps.generateWithFallback(prompt, config)
-    logAiRequest({
-      callType: 'observer-user',
-      groupId,
-      model: config.OBSERVER_MODEL,
-      durationMs: Date.now() - userStart,
-      input: { prompt, promptLength: prompt.length, userId },
-      output: { summaryText: text, summaryLength: text.length },
-    })
+    let text: string
+    try {
+      text = await deps.generateWithFallback(prompt, config)
+      logAiRequest({
+        callType: 'observer-user',
+        groupId,
+        model: config.OBSERVER_MODEL,
+        durationMs: Date.now() - userStart,
+        input: { prompt, promptLength: prompt.length, userId },
+        output: { summaryText: text, summaryLength: text.length },
+      })
+    }
+    catch (error) {
+      logAiRequest({
+        callType: 'observer-user',
+        groupId,
+        model: config.OBSERVER_MODEL,
+        durationMs: Date.now() - userStart,
+        input: { prompt, promptLength: prompt.length, userId },
+        output: null,
+        error,
+      })
+      throw error
+    }
 
     await deps.upsertUserSummary(db, groupId, userId, text)
     observerLog.withMetadata({ userId, summaryLength: text.length }).debug('User summary compressed')
