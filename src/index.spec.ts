@@ -37,14 +37,14 @@ describe('Application Entry (src/index.ts)', () => {
   })
 
   test('啟動流程會啟動注入的 channels', async () => {
-    shutdown = await main({ discord: mockDiscord, line: mockLine, dbDir: `/tmp/test-index-${Date.now()}` })
+    shutdown = await main({ discord: mockDiscord, line: mockLine, dbPath: `/tmp/test-index-${Date.now()}.db` })
 
     expect(mockDiscord.start.mock.calls.length).toBe(1)
     expect(mockLine.start.mock.calls.length).toBe(1)
   })
 
   test('onMessage 正確連接到 bootstrap routing，且兩個 channels 綁定不同 handler', async () => {
-    shutdown = await main({ discord: mockDiscord, line: mockLine, dbDir: `/tmp/test-index-${Date.now()}` })
+    shutdown = await main({ discord: mockDiscord, line: mockLine, dbPath: `/tmp/test-index-${Date.now()}.db` })
 
     expect(typeof mockDiscord.onMessage).toBe('function')
     expect(typeof mockLine.onMessage).toBe('function')

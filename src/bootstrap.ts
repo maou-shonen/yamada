@@ -1,22 +1,21 @@
 import type { AgentServices } from './agent/index'
 import type { Config } from './config/index.ts'
 import type { Scheduler } from './scheduler/index'
+import type { AppDb } from './storage/db'
 import type { PlatformChannel, UnifiedMessage } from './types'
-import { mkdirSync } from 'node:fs'
-import path from 'node:path'
 import { Agent } from './agent/index'
 import { log } from './logger'
 import { createScheduler as defaultCreateScheduler } from './scheduler/index'
 import { upsertTrigger } from './scheduler/trigger-store'
-import { GroupDbManager } from './storage/db'
-import { closeMainDb, openMainDb } from './storage/main-db'
+import { closeDb, openDb } from './storage/db'
+import { SqliteVectorStore } from './storage/sqlite-vector-store'
 
 const routerLog = log.withPrefix('[Router]')
 
 /** bootstrap 回傳的共用資源，供各入口點使用 */
 export interface AppContext {
   config: Config
-  manager: GroupDbManager
+  appDb: AppDb
   channels: Map<string, PlatformChannel>
   groupAgents: Map<string, Agent>
   /** 將 channel 註冊到 router 並啟動 */
@@ -29,10 +28,8 @@ export interface AppContext {
 
 /** 可注入的選項（測試時用 mock 替換） */
 export interface BootstrapOptions {
-  /** 測試時可使用 temp dir 避免建立實際檔案 */
-  dbDir?: string
-  /** 測試時可指定 temp main.db 路徑 */
-  mainDbPath?: string
+  /** 測試時可指定 temp DB 路徑 */
+  dbPath?: string
   /** 測試時注入 fake scheduler factory */
   createScheduler?: typeof defaultCreateScheduler
   /** 測試時注入 mock agent services（AI、storage 等） */
@@ -45,21 +42,14 @@ export interface BootstrapOptions {
  * 目的：允許 Discord-only、LINE-only 或雙平台入口點共享同一初始化序列，避免重複程式碼。
  * 不包含平台 channel 的建立與啟動，由各入口點自行處理。
  *
- * 初始化順序：GroupDbManager → main.db → scheduler
- * 關閉順序：channels → scheduler → agents → main.db → per-group DBs
+ * 初始化順序：single DB → scheduler
+ * 關閉順序：channels → scheduler → agents → DB
  */
 export async function bootstrap(config: Config, options?: BootstrapOptions): Promise<AppContext> {
-  const dbDir = options?.dbDir ?? config.DB_DIR
-  log.withMetadata({ dbDir }).info('Initializing GroupDbManager...')
-  const manager = new GroupDbManager(dbDir, config.EMBEDDING_DIMENSIONS)
-
-  // 確保 data/ 及 data/groups/ 目錄存在（recursive 會一次建立完整路徑）
-  mkdirSync(dbDir, { recursive: true })
-
-  // 初始化全域 main.db（排程器用）
-  const mainDbPath = options?.mainDbPath ?? path.join(path.dirname(dbDir), 'main.db')
-  log.withMetadata({ mainDbPath }).info('Opening main database...')
-  const { sqlite: mainSqlite } = openMainDb(mainDbPath)
+  const dbPath = options?.dbPath ?? config.DB_PATH
+  log.withMetadata({ dbPath }).info('Opening app database...')
+  const appDb = openDb(dbPath, config.EMBEDDING_DIMENSIONS)
+  const vectorStore = new SqliteVectorStore(appDb.sqlite)
 
   const channels = new Map<string, PlatformChannel>()
   const groupAgents = new Map<string, Agent>()
@@ -68,18 +58,16 @@ export async function bootstrap(config: Config, options?: BootstrapOptions): Pro
   // 建立排程器（負責 debounce trigger 輪詢 + AI pipeline 觸發）
   const schedulerFactory = options?.createScheduler ?? defaultCreateScheduler
   const scheduler: Scheduler = schedulerFactory({
-    sqlite: mainSqlite,
+    sqlite: appDb.sqlite,
     getAgent: (groupId: string) => groupAgents.get(groupId),
     config,
   })
 
   function createAgent(groupId: string): Agent {
-    const { db, vectorStore } = manager.getOrCreate(groupId)
-
     const agent = new Agent({
       groupId,
       config,
-      db,
+      db: appDb.db,
       vectorStore,
       channels,
       services: options?.agentServices,
@@ -113,8 +101,8 @@ export async function bootstrap(config: Config, options?: BootstrapOptions): Pro
 
     agent.receiveMessage(message)
 
-    // 寫入 debounce trigger（排程器會輪詢 main.db 決定何時觸發 AI pipeline）
-    upsertTrigger(mainSqlite, message.groupId, message.platform, message.isMention, message.content.length, config)
+    // 寫入 debounce trigger（排程器會輪詢 DB 決定何時觸發 AI pipeline）
+    upsertTrigger(appDb.sqlite, message.groupId, message.platform, message.isMention, message.content.length, config)
   }
 
   // startChannels：先註冊 channels 並綁定 onMessage，再啟動，最後啟動排程器
@@ -155,8 +143,7 @@ export async function bootstrap(config: Config, options?: BootstrapOptions): Pro
   // 1. 停止接收新訊息（channels）
   // 2. 停止排程器（等待 in-flight tick 完成）
   // 3. 等待 in-flight AI pipeline 完成（agents）
-  // 4. WAL checkpoint + 關閉 main.db
-  // 5. 關閉所有 per-group DB
+  // 4. 關閉 DB
   // 約束：使用 allSettled 而非 all，一個平台失敗不應阻止其他平台清理
   // 注意：不在此處呼叫 process.exit()，由入口點決定是否需要強制退出
   async function shutdown(activeChannels: PlatformChannel[]): Promise<void> {
@@ -173,15 +160,12 @@ export async function bootstrap(config: Config, options?: BootstrapOptions): Pro
       [...groupAgents.values()].map(agent => agent.shutdown()),
     )
 
-    // 4. WAL checkpoint + 關閉 main.db
-    closeMainDb(mainSqlite)
-
-    // 5. 關閉所有 per-group DB
-    manager.closeAll()
+    // 4. 關閉 DB
+    closeDb(appDb)
 
     log.info('yamada shutdown complete')
 
-    // 6. 停止 health server（當 LINE 未啟用時）
+    // 5. 停止 health server（當 LINE 未啟用時）
     if (healthServer) {
       healthServer.stop()
       healthServer = undefined
@@ -189,5 +173,5 @@ export async function bootstrap(config: Config, options?: BootstrapOptions): Pro
     }
   }
 
-  return { config, manager, channels, groupAgents, startChannels, shutdown, healthServer }
+  return { config, appDb, channels, groupAgents, startChannels, shutdown, healthServer }
 }

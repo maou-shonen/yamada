@@ -154,6 +154,11 @@ export class DiscordChannel implements PlatformChannel {
       )
     }
 
+    // 提取圖片附件（無論文字內容是否存在）
+    const imageAttachments = [...message.attachments.values()]
+      .filter(att => att.contentType?.startsWith('image/') ?? false)
+      .map(att => ({ url: att.url, contentType: att.contentType ?? undefined }))
+
     // 處理 content：空 content 時嘗試從 attachment / sticker 推導
     let content = message.content
     if (!content) {
@@ -189,6 +194,7 @@ export class DiscordChannel implements PlatformChannel {
       isMention,
       replyToExternalId: message.reference?.messageId,
       raw: message,
+      ...(imageAttachments.length > 0 && { images: imageAttachments }),
     }
 
     this.onMessage(unified)

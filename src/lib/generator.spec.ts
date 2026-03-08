@@ -142,6 +142,32 @@ describe('generateReply', () => {
     expect(Object.keys(tools).sort()).toEqual(['reaction', 'reply', 'skip'])
   })
 
+  test('visionEnabled=true 時 tools 包含 viewImage', async () => {
+    const config = createTestConfig({ visionEnabled: true })
+    const messages = [{ role: 'user' as const, content: '你好' }]
+    const { deps, generateTextMock } = createFakeDeps()
+
+    await generateReply(messages, config, deps)
+
+    const callArgs = generateTextMock.mock.calls[0] as unknown as [Record<string, unknown>]
+    const tools = callArgs[0].tools as Record<string, unknown>
+    expect(Object.keys(tools).sort()).toEqual(['reaction', 'reply', 'skip', 'viewImage'])
+  })
+
+  test('viewImage tool call → 回傳 viewImage action', async () => {
+    const config = createTestConfig({ visionEnabled: true })
+    const messages = [{ role: 'user' as const, content: '幫我看圖' }]
+    const { deps } = createFakeDeps([
+      { toolName: 'viewImage', input: { imageId: 5, question: '這張圖在做什麼？' } },
+    ])
+
+    const result = await generateReply(messages, config, deps)
+
+    expect(result.actions).toEqual([
+      { type: 'viewImage', imageId: 5, question: '這張圖在做什麼？' },
+    ])
+  })
+
   test('未設定 API key 時拋出錯誤', async () => {
     const config = createTestConfig()
     const messages = [{ role: 'user' as const, content: '你好' }]

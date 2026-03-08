@@ -103,6 +103,8 @@ function createResilienceServices(overrides: Partial<AgentServices> = {}): Agent
         reason: 'pass',
       },
     })) as unknown) as AgentServices['checkFrequency'],
+    analyzeImage: (mock(async () => 'mock image analysis') as unknown) as AgentServices['analyzeImage'],
+    getImageById: (mock((_db, _groupId, _id) => null) as unknown) as AgentServices['getImageById'],
     getOrCreateAlias,
     getAliasMap,
     ...overrides,
@@ -207,7 +209,7 @@ describe('T4-RESILIENCE: 錯誤韌性測試', () => {
     expect(threw).toBe(false)
 
     // 驗證：saveBotMessage 仍被呼叫（訊息被儲存）
-    const messages = getRecentMessages(db, 20)
+    const messages = getRecentMessages(db, 'group1', 20)
     const botMessages = messages.filter(m => m.isBot)
     expect(botMessages.length).toBeGreaterThanOrEqual(1)
 

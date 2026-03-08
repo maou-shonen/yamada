@@ -19,8 +19,8 @@ const configSchema = z.object({
 
   /** Bot 人格 system prompt */
   SOUL: z.string().min(1).default(DEFAULT_SOUL),
-  /** 群組 SQLite 資料庫目錄路徑，每個群組一個 {groupId}.db 檔案 */
-  DB_DIR: z.string().default('./data/groups/'),
+  /** 單一 SQLite 資料庫檔案路徑 */
+  DB_PATH: z.string().default('./data/yamada.db'),
   /** Discord groupId 取用模式：'guild' = 同 server 共用 / 'channel' = 每頻道獨立 */
   DISCORD_GROUP_ID_MODE: z.enum(['guild', 'channel']).default('guild'),
   /** LINE Webhook 監聽埠 */
@@ -98,6 +98,17 @@ const configSchema = z.object({
   /** 壓縮單一用戶摘要時，從 DB 取最近 N 則該用戶訊息 */
   OBSERVER_USER_MESSAGE_LIMIT: z.coerce.number().int().positive().default(50),
 
+  // ── Vision — 圖片理解 ──
+
+  /** Vision 模型 ID，格式：provider/model（逗號分隔 = fallback）；不設定則停用圖片理解功能 */
+  VISION_MODEL: z.string().min(1).optional(),
+  /** 縮圖最大邊長（px），用於儲存與 AI 圖片理解 */
+  IMAGE_MAX_DIMENSION: z.coerce.number().int().positive().default(512),
+  /** WebP 壓縮品質（0-100） */
+  IMAGE_QUALITY: z.coerce.number().int().min(0).max(100).default(65),
+  /** 下載圖片大小上限（MB），超過拒絕下載防止 OOM */
+  IMAGE_MAX_DOWNLOAD_SIZE_MB: z.coerce.number().int().positive().default(20),
+
   // ── Delivery — 訊息投遞與平台限制 ──
 
   /** Discord 單則訊息字元上限，超過會被截斷 */
@@ -169,6 +180,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       const prefix = configSet.toUpperCase().replace(/-/g, '_')
       return !!process.env[`${prefix}_API_KEY`]
     })(),
+    visionEnabled: !!config.VISION_MODEL,
   }
 }
 

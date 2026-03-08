@@ -283,6 +283,57 @@ describe('LineChannel', () => {
       expect(received[0].content).toBe('[圖片]')
     })
 
+    test('圖片訊息 → images 包含 platformImageId', async () => {
+      await channel.start()
+      const mockClient = createMockClient()
+      injectMockClient(channel, mockClient)
+      const port = (channel as unknown as { server: { port: number } }).server.port
+
+      const received: UnifiedMessage[] = []
+      channel.onMessage = msg => received.push(msg)
+
+      const event = createGroupMessageEvent({ messageType: 'image', messageId: 'img-msg-123' })
+      await sendWebhook(port, { events: [event] }, config.LINE_CHANNEL_SECRET!)
+      await new Promise(r => setTimeout(r, 100))
+
+      expect(received[0].images).toBeDefined()
+      expect(received[0].images).toHaveLength(1)
+      expect(received[0].images![0].platformImageId).toBe('img-msg-123')
+      expect(received[0].images![0].contentType).toBe('image/jpeg')
+    })
+
+    test('文字訊息 → images 為 undefined', async () => {
+      await channel.start()
+      const mockClient = createMockClient()
+      injectMockClient(channel, mockClient)
+      const port = (channel as unknown as { server: { port: number } }).server.port
+
+      const received: UnifiedMessage[] = []
+      channel.onMessage = msg => received.push(msg)
+
+      const event = createGroupMessageEvent({ messageType: 'text', text: '測試文字' })
+      await sendWebhook(port, { events: [event] }, config.LINE_CHANNEL_SECRET!)
+      await new Promise(r => setTimeout(r, 100))
+
+      expect(received[0].images).toBeUndefined()
+    })
+
+    test('貼圖訊息 → images 為 undefined', async () => {
+      await channel.start()
+      const mockClient = createMockClient()
+      injectMockClient(channel, mockClient)
+      const port = (channel as unknown as { server: { port: number } }).server.port
+
+      const received: UnifiedMessage[] = []
+      channel.onMessage = msg => received.push(msg)
+
+      const event = createGroupMessageEvent({ messageType: 'sticker' })
+      await sendWebhook(port, { events: [event] }, config.LINE_CHANNEL_SECRET!)
+      await new Promise(r => setTimeout(r, 100))
+
+      expect(received[0].images).toBeUndefined()
+    })
+
     test('貼圖訊息 → content 為 [貼圖]', async () => {
       await channel.start()
       const mockClient = createMockClient()

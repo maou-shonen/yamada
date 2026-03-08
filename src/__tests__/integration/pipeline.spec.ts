@@ -102,6 +102,8 @@ function createTestServices(overrides: Partial<AgentServices> = {}): AgentServic
         reason: 'pass',
       },
     })) as unknown) as AgentServices['checkFrequency'],
+    analyzeImage: (mock(async () => 'mock image analysis') as unknown) as AgentServices['analyzeImage'],
+    getImageById: (mock((_db, _groupId, _id) => null) as unknown) as AgentServices['getImageById'],
     getOrCreateAlias: (mock(async () => ({ alias: 'test_alias', userName: 'TestUser' })) as unknown) as AgentServices['getOrCreateAlias'],
     getAliasMap: (mock(async () => new Map()) as unknown) as AgentServices['getAliasMap'],
     ...overrides,
@@ -116,8 +118,8 @@ describe('Pipeline 整合測試', () => {
     const channels = new Map<string, PlatformChannel>([['discord', mockChannel]])
 
     const observerServices = createTestServices({
-      runObserver: (mock(async (runDb) => {
-        await upsertGroupSummary(runDb, 'Mock observer summary')
+      runObserver: (mock(async (runDb, groupId) => {
+        await upsertGroupSummary(runDb, groupId as string, 'Mock observer summary')
       }) as unknown) as AgentServices['runObserver'],
     })
 
@@ -143,7 +145,7 @@ describe('Pipeline 整合測試', () => {
     const runObserverMock = observerServices.runObserver as ReturnType<typeof mock>
     expect(runObserverMock.mock.calls.length).toBe(1)
 
-    const groupSummary = await getGroupSummary(db)
+    const groupSummary = await getGroupSummary(db, 'group-a')
     expect(groupSummary).toBe('Mock observer summary')
   })
 })

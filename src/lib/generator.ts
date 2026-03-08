@@ -23,6 +23,7 @@ export type AgentAction
   = | { type: 'reply', content: string }
     | { type: 'reaction', emoji: string }
     | { type: 'skip', reason: string }
+    | { type: 'viewImage', imageId: number, question?: string }
 
 export interface GenerateReplyResult {
   actions: AgentAction[]
@@ -49,8 +50,8 @@ const defaultDeps: GeneratorDeps = {
  * WHY 不在 execute 中直接投遞：generator 不該依賴 channel/platform 等基礎設施，
  * 保持純粹的「AI 決策」職責。
  */
-function createAgentTools() {
-  return {
+function createAgentTools(visionEnabled = false) {
+  const tools = {
     reply: tool({
       description: '回覆訊息到群組聊天',
       inputSchema: z.object({
@@ -73,6 +74,22 @@ function createAgentTools() {
       execute: async ({ reason }) => ({ skipped: true, reason }),
     }),
   }
+
+  if (visionEnabled) {
+    return {
+      ...tools,
+      viewImage: tool({
+        description: '查看並分析圖片的詳細內容。當你需要了解圖片的更多細節時使用（例如文字辨識、物件辨識、場景分析）。參數 imageId 來自對話中出現的圖片標記，例如 [圖片 #5: ...] 中的 5。',
+        inputSchema: z.object({
+          imageId: z.number().describe('要分析的圖片 ID'),
+          question: z.string().optional().describe('想了解圖片的什麼？不指定則做通用分析'),
+        }),
+        execute: async ({ imageId, question }) => ({ imageId, question: question ?? '' }),
+      }),
+    }
+  }
+
+  return tools
 }
 
 /**
@@ -111,7 +128,7 @@ export async function generateReply(
       const result = await deps.generateText({
         model,
         messages,
-        tools: createAgentTools(),
+        tools: createAgentTools(config.visionEnabled),
         toolChoice: 'required',
         stopWhen: stepCountIs(2),
       })
@@ -126,7 +143,8 @@ export async function generateReply(
       // WHY 過濾 dynamic：只處理我們定義的 tool，忽略 dynamic tool calls（不應出現但防禦性處理）
       const actions: AgentAction[] = []
       for (const step of result.steps) {
-        for (const toolCall of step.toolCalls) {
+        const toolCalls = step.toolCalls as Array<{ dynamic?: boolean, toolName: string, input: Record<string, any> }>
+        for (const toolCall of toolCalls) {
           if (toolCall.dynamic)
             continue
           switch (toolCall.toolName) {
@@ -138,6 +156,9 @@ export async function generateReply(
               break
             case 'skip':
               actions.push({ type: 'skip', reason: toolCall.input.reason })
+              break
+            case 'viewImage':
+              actions.push({ type: 'viewImage', imageId: toolCall.input.imageId, question: toolCall.input.question })
               break
           }
         }

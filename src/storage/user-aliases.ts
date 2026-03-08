@@ -1,16 +1,17 @@
 import type { DB } from './db'
 import { and, eq, inArray } from 'drizzle-orm'
-import { generateAlias } from './alias-generator'
+import { generateAlias } from '../utils/alias-generator'
 import * as schema from './schema'
 
 /**
- * 取得所有已存在的 alias 集合，供碰撞檢測使用。
+ * 取得指定群組中所有已存在的 alias 集合，供碰撞檢測使用。
  * 同步函式——直接讀取 per-group DB。
  */
-export function getAllAliases(db: DB): Set<string> {
+export function getAllAliases(db: DB, groupId: string): Set<string> {
   const rows = db
     .select({ alias: schema.userAliases.alias })
     .from(schema.userAliases)
+    .where(eq(schema.userAliases.groupId, groupId))
     .all()
 
   return new Set(rows.map(row => row.alias))
@@ -20,11 +21,12 @@ export function getAllAliases(db: DB): Set<string> {
  * 查詢或建立用戶 alias。
  *
  * - userId === 'bot'：直接回傳 `{ alias: 'bot', userName }`，不寫入 DB
- * - userId 已有 alias：更新 userName 和 updatedAt，回傳現有 alias
- * - userId 不存在：產生唯一 alias，INSERT，回傳
+ * - userId 已有 alias（在此群組）：更新 userName 和 updatedAt，回傳現有 alias
+ * - userId 不存在（在此群組）：產生唯一 alias，INSERT，回傳
  */
 export async function getOrCreateAlias(
   db: DB,
+  groupId: string,
   userId: string,
   userName: string,
 ): Promise<{ alias: string, userName: string }> {
@@ -33,14 +35,19 @@ export async function getOrCreateAlias(
     return { alias: 'bot', userName }
   }
 
-  // 取得現有 alias 集合（用於碰撞檢測）
-  const existingAliases = getAllAliases(db)
+  // 取得現有 alias 集合（用於碰撞檢測，限於此群組）
+  const existingAliases = getAllAliases(db, groupId)
 
-  // 查詢此 userId 是否已有 alias
+  // 查詢此 userId 是否已有 alias（在此群組）
   const existing = db
     .select()
     .from(schema.userAliases)
-    .where(eq(schema.userAliases.userId, userId))
+    .where(
+      and(
+        eq(schema.userAliases.groupId, groupId),
+        eq(schema.userAliases.userId, userId),
+      ),
+    )
     .get()
 
   if (existing) {
@@ -49,6 +56,7 @@ export async function getOrCreateAlias(
       .set({ userName, updatedAt: Date.now() })
       .where(
         and(
+          eq(schema.userAliases.groupId, groupId),
           eq(schema.userAliases.userId, userId),
           eq(schema.userAliases.alias, existing.alias),
         ),
@@ -62,18 +70,19 @@ export async function getOrCreateAlias(
   const alias = generateAlias(existingAliases)
 
   db.insert(schema.userAliases)
-    .values({ userId, alias, userName, updatedAt: Date.now() })
+    .values({ groupId, userId, alias, userName, updatedAt: Date.now() })
     .run()
 
   return { alias, userName }
 }
 
 /**
- * 批量查詢多個 userId 的 alias 和 userName。
+ * 批量查詢指定群組中多個 userId 的 alias 和 userName。
  * 回傳 `Map<userId, { alias, userName }>`；不在 DB 的 userId 不包含在 Map 中。
  */
 export async function getAliasMap(
   db: DB,
+  groupId: string,
   userIds: string[],
 ): Promise<Map<string, { alias: string, userName: string }>> {
   if (userIds.length === 0) {
@@ -83,7 +92,12 @@ export async function getAliasMap(
   const rows = db
     .select()
     .from(schema.userAliases)
-    .where(inArray(schema.userAliases.userId, userIds))
+    .where(
+      and(
+        eq(schema.userAliases.groupId, groupId),
+        inArray(schema.userAliases.userId, userIds),
+      ),
+    )
     .all()
 
   return new Map(

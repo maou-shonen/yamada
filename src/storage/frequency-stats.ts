@@ -1,5 +1,5 @@
 import type { DB } from './db'
-import { and, count, eq, gt, sql } from 'drizzle-orm'
+import { and, count, eq, gt } from 'drizzle-orm'
 import * as schema from './schema'
 
 /**
@@ -15,10 +15,10 @@ export interface FrequencyState {
 }
 
 /**
- * 讀取 frequency_state singleton row（id=1）
+ * 讀取指定群組的 frequency_state row
  * 若 DB 尚未初始化過（空表），回傳 undefined
  */
-export function getFrequencyState(db: DB): FrequencyState | undefined {
+export function getFrequencyState(db: DB, groupId: string): FrequencyState | undefined {
   const row = db
     .select({
       emaLongBot: schema.frequencyState.emaLongBot,
@@ -28,43 +28,59 @@ export function getFrequencyState(db: DB): FrequencyState | undefined {
       lastUpdatedAt: schema.frequencyState.lastUpdatedAt,
     })
     .from(schema.frequencyState)
-    .where(eq(schema.frequencyState.id, 1))
+    .where(eq(schema.frequencyState.groupId, groupId))
     .get()
 
   return row
 }
 
 /**
- * 儲存（或覆蓋）frequency_state singleton row
- * 使用 INSERT OR REPLACE INTO ... (id=1) 確保永遠只有一筆 row
+ * 儲存（或覆蓋）指定群組的 frequency_state row
+ * 使用 INSERT OR REPLACE INTO ... (group_id) 確保每個群組只有一筆 row
  */
-export function saveFrequencyState(db: DB, state: FrequencyState): void {
-  db.run(
-    sql`INSERT OR REPLACE INTO frequency_state
-        (id, ema_long_bot, ema_long_total, ema_short_bot, ema_short_total, last_updated_at)
-        VALUES (1, ${state.emaLongBot}, ${state.emaLongTotal}, ${state.emaShortBot}, ${state.emaShortTotal}, ${state.lastUpdatedAt})`,
-  )
+export function saveFrequencyState(db: DB, groupId: string, state: FrequencyState): void {
+  db.insert(schema.frequencyState)
+    .values({
+      groupId,
+      emaLongBot: state.emaLongBot,
+      emaLongTotal: state.emaLongTotal,
+      emaShortBot: state.emaShortBot,
+      emaShortTotal: state.emaShortTotal,
+      lastUpdatedAt: state.lastUpdatedAt,
+    })
+    .onConflictDoUpdate({
+      target: schema.frequencyState.groupId,
+      set: {
+        emaLongBot: state.emaLongBot,
+        emaLongTotal: state.emaLongTotal,
+        emaShortBot: state.emaShortBot,
+        emaShortTotal: state.emaShortTotal,
+        lastUpdatedAt: state.lastUpdatedAt,
+      },
+    })
+    .run()
 }
 
 /**
- * 計算 since（Unix ms，嚴格大於）之後的訊息數
+ * 計算指定群組在 since（Unix ms，嚴格大於）之後的訊息數
  * 回傳 total（全部訊息）和 bot（is_bot=1 的訊息）
  * 用於頻率控制器計算 bot share 統計
  */
 export function countMessagesSince(
   db: DB,
+  groupId: string,
   since: number,
 ): { total: number, bot: number } {
   const totalRow = db
     .select({ count: count() })
     .from(schema.messages)
-    .where(gt(schema.messages.timestamp, since))
+    .where(and(eq(schema.messages.groupId, groupId), gt(schema.messages.timestamp, since)))
     .get()
 
   const botRow = db
     .select({ count: count() })
     .from(schema.messages)
-    .where(and(gt(schema.messages.timestamp, since), eq(schema.messages.isBot, true)))
+    .where(and(eq(schema.messages.groupId, groupId), gt(schema.messages.timestamp, since), eq(schema.messages.isBot, true)))
     .get()
 
   return {
@@ -74,15 +90,15 @@ export function countMessagesSince(
 }
 
 /**
- * 計算 since（Unix ms，嚴格大於）之後的活躍非 bot 用戶數
+ * 計算指定群組在 since（Unix ms，嚴格大於）之後的活躍非 bot 用戶數
  * 複用 getDistinctUserIds 的查詢邏輯，但回傳 count 而非 id list
  * 用於頻率控制器計算「活躍群組大小」
  */
-export function countActiveMembers(db: DB, since: number): number {
+export function countActiveMembers(db: DB, groupId: string, since: number): number {
   const rows = db
     .selectDistinct({ userId: schema.messages.userId })
     .from(schema.messages)
-    .where(and(gt(schema.messages.timestamp, since), eq(schema.messages.isBot, false)))
+    .where(and(eq(schema.messages.groupId, groupId), gt(schema.messages.timestamp, since), eq(schema.messages.isBot, false)))
     .all()
 
   return rows.length

@@ -96,22 +96,19 @@ describe('Bootstrap 整合測試', () => {
   test('bootstrap() 成功初始化並回傳 AppContext', async () => {
     const tmpDir = makeTempDir()
     tempDirs.push(tmpDir)
-    const dbDir = path.join(tmpDir, 'groups')
-    mkdirSync(dbDir, { recursive: true })
-    const mainDbPath = path.join(tmpDir, 'main.db')
+    const dbPath = path.join(tmpDir, 'yamada.db')
 
     const callOrder: string[] = []
     const { factory } = makeFakeSchedulerFactory(callOrder)
     const config = makeTestConfig()
 
     const ctx = await bootstrap(config, {
-      dbDir,
-      mainDbPath,
+      dbPath,
       createScheduler: factory,
     })
 
     expect(ctx.config).toBe(config)
-    expect(ctx.manager).toBeDefined()
+    expect(ctx.appDb).toBeDefined()
     expect(ctx.channels).toBeInstanceOf(Map)
     expect(ctx.groupAgents).toBeInstanceOf(Map)
     expect(typeof ctx.startChannels).toBe('function')
@@ -120,27 +117,24 @@ describe('Bootstrap 整合測試', () => {
     // scheduler factory 應該被呼叫一次
     expect(factory).toHaveBeenCalledTimes(1)
 
-    // main.db 檔案應被建立
-    expect(existsSync(mainDbPath)).toBe(true)
+    // DB 檔案應被建立
+    expect(existsSync(dbPath)).toBe(true)
 
     // 清理
     await ctx.shutdown([])
   })
 
-  test('handleMessage() 呼叫 agent.receiveMessage() 並寫入 main.db trigger', async () => {
+  test('handleMessage() 呼叫 agent.receiveMessage() 並寫入 DB trigger', async () => {
     const tmpDir = makeTempDir()
     tempDirs.push(tmpDir)
-    const dbDir = path.join(tmpDir, 'groups')
-    mkdirSync(dbDir, { recursive: true })
-    const mainDbPath = path.join(tmpDir, 'main.db')
+    const dbPath = path.join(tmpDir, 'yamada.db')
 
     const callOrder: string[] = []
     const { factory } = makeFakeSchedulerFactory(callOrder)
     const config = makeTestConfig()
 
     const ctx = await bootstrap(config, {
-      dbDir,
-      mainDbPath,
+      dbPath,
       createScheduler: factory,
     })
 
@@ -154,8 +148,8 @@ describe('Bootstrap 整合測試', () => {
     // Agent 應被 lazy 建立
     expect(ctx.groupAgents.has('group-abc')).toBe(true)
 
-    // 驗證 main.db 中有 trigger 記錄
-    const sqlite = new Database(mainDbPath, { readonly: true })
+    // 驗證 DB 中有 trigger 記錄
+    const sqlite = new Database(dbPath, { readonly: true })
     const row = sqlite.query('SELECT * FROM pending_triggers WHERE group_id = ?').get('group-abc') as Record<string, unknown> | null
     sqlite.close()
 
@@ -170,17 +164,14 @@ describe('Bootstrap 整合測試', () => {
   test('startChannels() 啟動 channels 並啟動 scheduler', async () => {
     const tmpDir = makeTempDir()
     tempDirs.push(tmpDir)
-    const dbDir = path.join(tmpDir, 'groups')
-    mkdirSync(dbDir, { recursive: true })
-    const mainDbPath = path.join(tmpDir, 'main.db')
+    const dbPath = path.join(tmpDir, 'yamada.db')
 
     const callOrder: string[] = []
     const { factory, startMock } = makeFakeSchedulerFactory(callOrder)
     const config = makeTestConfig()
 
     const ctx = await bootstrap(config, {
-      dbDir,
-      mainDbPath,
+      dbPath,
       createScheduler: factory,
     })
 
@@ -204,20 +195,17 @@ describe('Bootstrap 整合測試', () => {
     await ctx.shutdown([ch1, ch2])
   })
 
-  test('shutdown() 順序正確：channels → scheduler → agents → closeMainDb → closeAll', async () => {
+  test('shutdown() 順序正確：channels → scheduler → agents', async () => {
     const tmpDir = makeTempDir()
     tempDirs.push(tmpDir)
-    const dbDir = path.join(tmpDir, 'groups')
-    mkdirSync(dbDir, { recursive: true })
-    const mainDbPath = path.join(tmpDir, 'main.db')
+    const dbPath = path.join(tmpDir, 'yamada.db')
 
     const callOrder: string[] = []
     const { factory } = makeFakeSchedulerFactory(callOrder)
     const config = makeTestConfig()
 
     const ctx = await bootstrap(config, {
-      dbDir,
-      mainDbPath,
+      dbPath,
       createScheduler: factory,
     })
 
@@ -243,13 +231,6 @@ describe('Bootstrap 整合測試', () => {
       await originalAgentShutdown()
     }
 
-    // 替換 manager.closeAll 追蹤呼叫順序
-    const originalCloseAll = ctx.manager.closeAll.bind(ctx.manager)
-    ctx.manager.closeAll = () => {
-      callOrder.push('manager.closeAll')
-      originalCloseAll()
-    }
-
     await ctx.shutdown([ch])
 
     // 驗證關閉順序
@@ -258,18 +239,13 @@ describe('Bootstrap 整合測試', () => {
       'channel.stop',
       'scheduler.stop',
       'agent.shutdown',
-      // closeMainDb 在 manager.closeAll 之前，但我們無法直接追蹤 closeMainDb
-      // 因為它是內部呼叫。驗證 manager.closeAll 在最後
-      'manager.closeAll',
     ])
   })
 
   test('重啟後 scheduler factory 被再次呼叫（新的 scheduler 實例）', async () => {
     const tmpDir = makeTempDir()
     tempDirs.push(tmpDir)
-    const dbDir = path.join(tmpDir, 'groups')
-    mkdirSync(dbDir, { recursive: true })
-    const mainDbPath = path.join(tmpDir, 'main.db')
+    const dbPath = path.join(tmpDir, 'yamada.db')
 
     const callOrder: string[] = []
     const { factory } = makeFakeSchedulerFactory(callOrder)
@@ -277,20 +253,16 @@ describe('Bootstrap 整合測試', () => {
 
     // 第一次啟動
     const ctx1 = await bootstrap(config, {
-      dbDir,
-      mainDbPath,
+      dbPath,
       createScheduler: factory,
     })
     await ctx1.shutdown([])
 
-    // 第二次啟動（模擬重啟）——需要新的 main.db 路徑因為前一個已關閉
-    const mainDbPath2 = path.join(tmpDir, 'main2.db')
     const callOrder2: string[] = []
     const { factory: factory2 } = makeFakeSchedulerFactory(callOrder2)
 
     const ctx2 = await bootstrap(config, {
-      dbDir,
-      mainDbPath: mainDbPath2,
+      dbPath,
       createScheduler: factory2,
     })
 
@@ -303,17 +275,14 @@ describe('Bootstrap 整合測試', () => {
   test('handleMessage() 多次訊息累積 pending_chars', async () => {
     const tmpDir = makeTempDir()
     tempDirs.push(tmpDir)
-    const dbDir = path.join(tmpDir, 'groups')
-    mkdirSync(dbDir, { recursive: true })
-    const mainDbPath = path.join(tmpDir, 'main.db')
+    const dbPath = path.join(tmpDir, 'yamada.db')
 
     const callOrder: string[] = []
     const { factory } = makeFakeSchedulerFactory(callOrder)
     const config = makeTestConfig()
 
     const ctx = await bootstrap(config, {
-      dbDir,
-      mainDbPath,
+      dbPath,
       createScheduler: factory,
     })
 
@@ -325,7 +294,7 @@ describe('Bootstrap 整合測試', () => {
     channel_onMessage(channel, makeMessage({ groupId: 'group-accumulate', content: 'BBBBB' })) // 5 chars
 
     // 驗證累積的 pending_chars
-    const sqlite = new Database(mainDbPath, { readonly: true })
+    const sqlite = new Database(dbPath, { readonly: true })
     const row = sqlite.query('SELECT pending_chars FROM pending_triggers WHERE group_id = ?').get('group-accumulate') as { pending_chars: number } | null
     sqlite.close()
 

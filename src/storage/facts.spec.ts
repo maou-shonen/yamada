@@ -31,14 +31,14 @@ afterEach(() => {
 
 describe('upsertFact', () => {
   test('insert new user fact — appears in getFactsByUser with evidence_count=1', () => {
-    upsertFact(db, {
+    upsertFact(db, 'group-a', {
       scope: 'user',
       userId: 'u1',
       canonicalKey: 'favorite_food',
       content: 'Alice likes sushi',
     })
 
-    const facts = getFactsByUser(db, 'u1')
+    const facts = getFactsByUser(db, 'group-a', 'u1')
     expect(facts).toHaveLength(1)
     expect(facts[0].content).toBe('Alice likes sushi')
     expect(facts[0].evidenceCount).toBe(1)
@@ -46,13 +46,13 @@ describe('upsertFact', () => {
   })
 
   test('insert new group fact — appears in getGroupFacts with evidence_count=1', () => {
-    upsertFact(db, {
+    upsertFact(db, 'group-a', {
       scope: 'group',
       canonicalKey: 'weekly_meeting',
       content: 'Weekly meeting on Monday',
     })
 
-    const facts = getGroupFacts(db)
+    const facts = getGroupFacts(db, 'group-a')
     expect(facts).toHaveLength(1)
     expect(facts[0].content).toBe('Weekly meeting on Monday')
     expect(facts[0].evidenceCount).toBe(1)
@@ -60,21 +60,21 @@ describe('upsertFact', () => {
   })
 
   test('upsert same (canonical_key, scope, user_id) — updates content and increments evidence_count', () => {
-    upsertFact(db, {
+    upsertFact(db, 'group-a', {
       scope: 'user',
       userId: 'u1',
       canonicalKey: 'favorite_food',
       content: 'Alice likes sushi',
     })
 
-    upsertFact(db, {
+    upsertFact(db, 'group-a', {
       scope: 'user',
       userId: 'u1',
       canonicalKey: 'favorite_food',
       content: 'Alice loves ramen now',
     })
 
-    const facts = getFactsByUser(db, 'u1')
+    const facts = getFactsByUser(db, 'group-a', 'u1')
     expect(facts).toHaveLength(1)
     expect(facts[0].content).toBe('Alice loves ramen now')
     expect(facts[0].evidenceCount).toBe(2)
@@ -85,21 +85,21 @@ describe('upsertFact', () => {
 
 describe('supersedeFact', () => {
   test('marks fact as superseded — hidden from default query, visible with status filter', () => {
-    upsertFact(db, {
+    upsertFact(db, 'group-a', {
       scope: 'user',
       userId: 'u1',
       canonicalKey: 'job',
       content: 'Alice is a student',
     })
 
-    const before = getFactsByUser(db, 'u1')
+    const before = getFactsByUser(db, 'group-a', 'u1')
     expect(before).toHaveLength(1)
 
-    supersedeFact(db, before[0].id)
+    supersedeFact(db, 'group-a', before[0].id)
 
-    expect(getFactsByUser(db, 'u1')).toHaveLength(0)
+    expect(getFactsByUser(db, 'group-a', 'u1')).toHaveLength(0)
 
-    const superseded = getFactsByUser(db, 'u1', 'superseded')
+    const superseded = getFactsByUser(db, 'group-a', 'u1', 'superseded')
     expect(superseded).toHaveLength(1)
     expect(superseded[0].status).toBe('superseded')
   })
@@ -109,34 +109,34 @@ describe('supersedeFact', () => {
 
 describe('getFactsByUser', () => {
   test('returns only active facts by default', () => {
-    upsertFact(db, { scope: 'user', userId: 'u1', canonicalKey: 'k1', content: 'active fact' })
-    upsertFact(db, { scope: 'user', userId: 'u1', canonicalKey: 'k2', content: 'will be superseded' })
+    upsertFact(db, 'group-a', { scope: 'user', userId: 'u1', canonicalKey: 'k1', content: 'active fact' })
+    upsertFact(db, 'group-a', { scope: 'user', userId: 'u1', canonicalKey: 'k2', content: 'will be superseded' })
 
-    const all = getFactsByUser(db, 'u1')
+    const all = getFactsByUser(db, 'group-a', 'u1')
     expect(all).toHaveLength(2)
 
-    supersedeFact(db, all.find(f => f.canonicalKey === 'k2')!.id)
+    supersedeFact(db, 'group-a', all.find(f => f.canonicalKey === 'k2')!.id)
 
-    const afterSupersede = getFactsByUser(db, 'u1')
+    const afterSupersede = getFactsByUser(db, 'group-a', 'u1')
     expect(afterSupersede).toHaveLength(1)
     expect(afterSupersede[0].content).toBe('active fact')
   })
 
   test('returns facts for specific userId only', () => {
-    upsertFact(db, { scope: 'user', userId: 'u1', canonicalKey: 'k1', content: 'user1 fact' })
-    upsertFact(db, { scope: 'user', userId: 'u2', canonicalKey: 'k2', content: 'user2 fact' })
+    upsertFact(db, 'group-a', { scope: 'user', userId: 'u1', canonicalKey: 'k1', content: 'user1 fact' })
+    upsertFact(db, 'group-a', { scope: 'user', userId: 'u2', canonicalKey: 'k2', content: 'user2 fact' })
 
-    const u1 = getFactsByUser(db, 'u1')
+    const u1 = getFactsByUser(db, 'group-a', 'u1')
     expect(u1).toHaveLength(1)
     expect(u1[0].content).toBe('user1 fact')
 
-    const u2 = getFactsByUser(db, 'u2')
+    const u2 = getFactsByUser(db, 'group-a', 'u2')
     expect(u2).toHaveLength(1)
     expect(u2[0].content).toBe('user2 fact')
   })
 
   test('returns empty array for unknown userId', () => {
-    expect(getFactsByUser(db, 'nonexistent')).toEqual([])
+    expect(getFactsByUser(db, 'group-a', 'nonexistent')).toEqual([])
   })
 })
 
@@ -144,10 +144,10 @@ describe('getFactsByUser', () => {
 
 describe('getGroupFacts', () => {
   test('returns only group-scope facts, not user-scope', () => {
-    upsertFact(db, { scope: 'group', canonicalKey: 'g1', content: 'group fact' })
-    upsertFact(db, { scope: 'user', userId: 'u1', canonicalKey: 'u1', content: 'user fact' })
+    upsertFact(db, 'group-a', { scope: 'group', canonicalKey: 'g1', content: 'group fact' })
+    upsertFact(db, 'group-a', { scope: 'user', userId: 'u1', canonicalKey: 'u1', content: 'user fact' })
 
-    const facts = getGroupFacts(db)
+    const facts = getGroupFacts(db, 'group-a')
     expect(facts).toHaveLength(1)
     expect(facts[0].content).toBe('group fact')
   })
@@ -159,6 +159,7 @@ describe('getPinnedFacts', () => {
   test('returns pinned facts for specific user (scope=user, pinned=true)', () => {
     const now = Date.now()
     db.insert(schema.facts).values({
+      groupId: 'group-a',
       scope: 'user',
       userId: 'u1',
       canonicalKey: 'pinned_user',
@@ -172,9 +173,9 @@ describe('getPinnedFacts', () => {
     }).run()
 
     // non-pinned user fact
-    upsertFact(db, { scope: 'user', userId: 'u1', canonicalKey: 'normal', content: 'normal fact' })
+    upsertFact(db, 'group-a', { scope: 'user', userId: 'u1', canonicalKey: 'normal', content: 'normal fact' })
 
-    const pinned = getPinnedFacts(db, 'u1')
+    const pinned = getPinnedFacts(db, 'group-a', 'u1')
     expect(pinned).toHaveLength(1)
     expect(pinned[0].content).toBe('important user fact')
   })
@@ -182,6 +183,7 @@ describe('getPinnedFacts', () => {
   test('returns group pinned facts when no userId provided', () => {
     const now = Date.now()
     db.insert(schema.facts).values({
+      groupId: 'group-a',
       scope: 'group',
       userId: null,
       canonicalKey: 'group_pinned',
@@ -194,16 +196,16 @@ describe('getPinnedFacts', () => {
       updatedAt: now,
     }).run()
 
-    const pinned = getPinnedFacts(db)
+    const pinned = getPinnedFacts(db, 'group-a')
     expect(pinned).toHaveLength(1)
     expect(pinned[0].content).toBe('important group fact')
   })
 
   test('does NOT return non-pinned facts', () => {
-    upsertFact(db, { scope: 'user', userId: 'u1', canonicalKey: 'k1', content: 'not pinned' })
-    upsertFact(db, { scope: 'group', canonicalKey: 'k2', content: 'not pinned either' })
+    upsertFact(db, 'group-a', { scope: 'user', userId: 'u1', canonicalKey: 'k1', content: 'not pinned' })
+    upsertFact(db, 'group-a', { scope: 'group', canonicalKey: 'k2', content: 'not pinned either' })
 
-    expect(getPinnedFacts(db, 'u1')).toHaveLength(0)
+    expect(getPinnedFacts(db, 'group-a', 'u1')).toHaveLength(0)
   })
 })
 
@@ -211,20 +213,20 @@ describe('getPinnedFacts', () => {
 
 describe('getAllActiveFacts', () => {
   test('returns all active facts (both user and group scope)', () => {
-    upsertFact(db, { scope: 'user', userId: 'u1', canonicalKey: 'k1', content: 'user fact' })
-    upsertFact(db, { scope: 'group', canonicalKey: 'k2', content: 'group fact' })
+    upsertFact(db, 'group-a', { scope: 'user', userId: 'u1', canonicalKey: 'k1', content: 'user fact' })
+    upsertFact(db, 'group-a', { scope: 'group', canonicalKey: 'k2', content: 'group fact' })
 
-    expect(getAllActiveFacts(db)).toHaveLength(2)
+    expect(getAllActiveFacts(db, 'group-a')).toHaveLength(2)
   })
 
   test('does NOT return superseded facts', () => {
-    upsertFact(db, { scope: 'user', userId: 'u1', canonicalKey: 'k1', content: 'will supersede' })
-    upsertFact(db, { scope: 'group', canonicalKey: 'k2', content: 'stays active' })
+    upsertFact(db, 'group-a', { scope: 'user', userId: 'u1', canonicalKey: 'k1', content: 'will supersede' })
+    upsertFact(db, 'group-a', { scope: 'group', canonicalKey: 'k2', content: 'stays active' })
 
-    const all = getAllActiveFacts(db)
-    supersedeFact(db, all.find(f => f.canonicalKey === 'k1')!.id)
+    const all = getAllActiveFacts(db, 'group-a')
+    supersedeFact(db, 'group-a', all.find(f => f.canonicalKey === 'k1')!.id)
 
-    const after = getAllActiveFacts(db)
+    const after = getAllActiveFacts(db, 'group-a')
     expect(after).toHaveLength(1)
     expect(after[0].canonicalKey).toBe('k2')
   })
@@ -234,17 +236,30 @@ describe('getAllActiveFacts', () => {
 
 describe('getFactWatermark / setFactWatermark', () => {
   test('returns 0 on empty DB', () => {
-    expect(getFactWatermark(db)).toBe(0)
+    expect(getFactWatermark(db, 'group-a')).toBe(0)
   })
 
   test('set then get returns the value', () => {
-    setFactWatermark(db, 1700000000000)
-    expect(getFactWatermark(db)).toBe(1700000000000)
+    setFactWatermark(db, 'group-a', 1700000000000)
+    expect(getFactWatermark(db, 'group-a')).toBe(1700000000000)
   })
 
   test('calling set twice updates the value (upsert behavior)', () => {
-    setFactWatermark(db, 1700000000000)
-    setFactWatermark(db, 1800000000000)
-    expect(getFactWatermark(db)).toBe(1800000000000)
+    setFactWatermark(db, 'group-a', 1700000000000)
+    setFactWatermark(db, 'group-a', 1800000000000)
+    expect(getFactWatermark(db, 'group-a')).toBe(1800000000000)
+  })
+
+  test('watermarks are per-group independent', () => {
+    setFactWatermark(db, 'group-a', 1700000000000)
+    setFactWatermark(db, 'group-b', 1800000000000)
+
+    expect(getFactWatermark(db, 'group-a')).toBe(1700000000000)
+    expect(getFactWatermark(db, 'group-b')).toBe(1800000000000)
+
+    // Update group-a should not affect group-b
+    setFactWatermark(db, 'group-a', 1900000000000)
+    expect(getFactWatermark(db, 'group-a')).toBe(1900000000000)
+    expect(getFactWatermark(db, 'group-b')).toBe(1800000000000)
   })
 })

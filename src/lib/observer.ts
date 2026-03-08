@@ -1,10 +1,9 @@
 import type { Config } from '../config/index.ts'
 import type { DB } from '../storage/db'
 import type { VectorStore } from '../storage/vector-store'
-import { count, gt } from 'drizzle-orm'
+import { and, count, eq, gt } from 'drizzle-orm'
 import { log } from '../logger'
 import { buildGroupCompressionPrompt, buildUserCompressionPrompt, formatChatHistory } from '../prompts/observer'
-import { processNewFactEmbeddings } from '../storage/embedding'
 import {
   getAllActiveFacts,
   getFactWatermark,
@@ -23,6 +22,7 @@ import {
 } from '../storage/summaries'
 import { getAliasMap } from '../storage/user-aliases'
 import { createUserMask } from './alias-replacer.ts'
+import { processNewFactEmbeddings } from './embedding'
 import { extractFacts } from './fact-extractor.ts'
 import { generateWithFallback } from './llm-utils.ts'
 
@@ -45,7 +45,7 @@ export interface ObserverDeps {
   upsertGroupSummary: typeof upsertGroupSummary
   getUserSummary: typeof getUserSummary
   upsertUserSummary: typeof upsertUserSummary
-  getAliasMap: (db: DB, userIds: string[]) => Promise<Map<string, { alias: string, userName: string }>>
+  getAliasMap: (db: DB, groupId: string, userIds: string[]) => Promise<Map<string, { alias: string, userName: string }>>
 }
 
 const defaultDeps: ObserverDeps = {
@@ -72,10 +72,11 @@ const defaultDeps: ObserverDeps = {
  * 取得群組摘要的 watermark（上次壓縮的時間戳）。
  * 若無既有摘要（首次壓縮），回傳 0，代表取全部歷史。
  */
-function getWatermark(db: DB): number {
+function getWatermark(db: DB, groupId: string): number {
   const row = db
     .select({ updatedAt: schema.groupSummaries.updatedAt })
     .from(schema.groupSummaries)
+    .where(eq(schema.groupSummaries.groupId, groupId))
     .get()
 
   return row?.updatedAt ?? 0
@@ -87,12 +88,12 @@ function getWatermark(db: DB): number {
  * 使用 group_summaries.updated_at 作為 watermark，只計算新增訊息。
  * 若無既有摘要（首次），計算全部訊息。
  */
-export function shouldRun(db: DB, config: Config): boolean {
-  const watermark = getWatermark(db)
+export function shouldRun(db: DB, groupId: string, config: Config): boolean {
+  const watermark = getWatermark(db, groupId)
 
   const whereClause = watermark > 0
-    ? gt(schema.messages.timestamp, watermark)
-    : undefined
+    ? and(eq(schema.messages.groupId, groupId), gt(schema.messages.timestamp, watermark))
+    : eq(schema.messages.groupId, groupId)
 
   const countResult = db
     .select({ count: count() })
@@ -121,12 +122,14 @@ export function shouldRun(db: DB, config: Config): boolean {
  * 首次壓縮（無舊摘要）時 watermark = 0，等同取全部歷史。
  *
  * @param db - 群組 DB 實例
+ * @param groupId - 群組 ID
  * @param watermark - 由 runObserver 頂層擷取並傳入，避免與 upsertGroupSummary 更新的 watermark 競態
  * @param config - 應用程式設定
  * @param deps - 可注入的依賴（測試用）
  */
 export async function compressGroupSummary(
   db: DB,
+  groupId: string,
   watermark: number,
   config: Config,
   deps: ObserverDeps = defaultDeps,
@@ -134,14 +137,14 @@ export async function compressGroupSummary(
 ): Promise<void> {
   observerLog.info('Compressing group summary')
 
-  const messages = deps.getMessagesSince(db, new Date(watermark))
-  const existingSummary = await deps.getGroupSummary(db)
+  const messages = deps.getMessagesSince(db, groupId, new Date(watermark))
+  const existingSummary = await deps.getGroupSummary(db, groupId)
 
   observerLog.withMetadata({ messageCount: messages.length, hasExisting: !!existingSummary }).debug('Group summary compression data')
 
   // 取得 userIds 並查詢 alias map
   const userIds = [...new Set(messages.filter(m => !m.isBot).map(m => m.userId))]
-  const fullAliasMap = await deps.getAliasMap(db, userIds)
+  const fullAliasMap = await deps.getAliasMap(db, groupId, userIds)
   const aliasMap = new Map([...fullAliasMap.entries()].map(([uid, v]) => [uid, v.alias]))
 
   const historyText = formatChatHistory(messages, aliasMap)
@@ -149,7 +152,7 @@ export async function compressGroupSummary(
 
   const text = await deps.generateWithFallback(prompt, config)
 
-  await deps.upsertGroupSummary(db, text)
+  await deps.upsertGroupSummary(db, groupId, text)
   observerLog.withMetadata({ summaryLength: text.length }).info('Group summary compressed')
 }
 
@@ -160,6 +163,7 @@ export async function compressGroupSummary(
  * 逐個用戶處理——每個用戶的人格側寫需要個別關注，批次處理會混淆身份。
  *
  * @param db - 群組 DB 實例
+ * @param groupId - 群組 ID
  * @param watermark - 由 runObserver 頂層擷取並傳入，避免與 compressGroupSummary 更新的 watermark 競態
  * @param userIds - 需要壓縮摘要的使用者 ID 列表
  * @param config - 應用程式設定
@@ -167,6 +171,7 @@ export async function compressGroupSummary(
  */
 export async function compressUserSummaries(
   db: DB,
+  groupId: string,
   watermark: number,
   userIds: string[],
   config: Config,
@@ -176,8 +181,8 @@ export async function compressUserSummaries(
   observerLog.withMetadata({ userCount: userIds.length }).info('Compressing user summaries')
 
   for (const userId of userIds) {
-    const messages = deps.getMessagesByUser(db, userId, config.OBSERVER_USER_MESSAGE_LIMIT)
-    const existingSummary = await deps.getUserSummary(db, userId)
+    const messages = deps.getMessagesByUser(db, groupId, userId, config.OBSERVER_USER_MESSAGE_LIMIT)
+    const existingSummary = await deps.getUserSummary(db, groupId, userId)
     const pinnedFacts = pinnedFactsMap?.get(userId)
 
     const messagesText = messages.map(m => m.content).join('\n')
@@ -185,7 +190,7 @@ export async function compressUserSummaries(
 
     const text = await deps.generateWithFallback(prompt, config)
 
-    await deps.upsertUserSummary(db, userId, text)
+    await deps.upsertUserSummary(db, groupId, userId, text)
     observerLog.withMetadata({ userId, summaryLength: text.length }).debug('User summary compressed')
   }
   observerLog.withMetadata({ userCount: userIds.length }).info('All user summaries compressed')
@@ -199,21 +204,22 @@ export async function compressUserSummaries(
  */
 async function runFactExtraction(
   db: DB,
+  groupId: string,
   vectorStore: VectorStore,
   config: Config,
   deps: ObserverDeps,
 ) {
   // 在取訊息前先記錄時間戳，避免 extraction 執行期間新訊息被 watermark 跳過
   const factExtractionStartTime = Date.now()
-  const factWatermark = deps.getFactWatermark(db)
-  const messagesSinceFactWatermark = deps.getMessagesSince(db, new Date(factWatermark))
+  const factWatermark = deps.getFactWatermark(db, groupId)
+  const messagesSinceFactWatermark = deps.getMessagesSince(db, groupId, new Date(factWatermark))
 
   // 首次執行（factWatermark=0）會載入全部歷史，限制筆數避免 prompt 過大
   const nonBotMessages = messagesSinceFactWatermark
     .filter(m => !m.isBot)
     .slice(-200)
 
-  const allActiveFacts = deps.getAllActiveFacts(db)
+  const allActiveFacts = deps.getAllActiveFacts(db, groupId)
   const existingFacts = allActiveFacts
     .filter((fact): fact is typeof fact & { scope: 'user' | 'group' } => fact.scope === 'user' || fact.scope === 'group')
 
@@ -222,7 +228,7 @@ async function runFactExtraction(
       ...nonBotMessages.map(m => m.userId),
       ...existingFacts.flatMap(f => f.userId !== null ? [f.userId] : []),
     ])]
-    const aliasMap = await deps.getAliasMap(db, allFactUserIds)
+    const aliasMap = await deps.getAliasMap(db, groupId, allFactUserIds)
     const userMask = createUserMask(aliasMap)
 
     const factMessages = nonBotMessages.map(m => ({
@@ -241,9 +247,9 @@ async function runFactExtraction(
 
     for (const result of results) {
       if (result.action === 'supersede' && result.targetFactId !== undefined)
-        deps.supersedeFact(db, result.targetFactId)
+        deps.supersedeFact(db, groupId, result.targetFactId)
 
-      deps.upsertFact(db, {
+      deps.upsertFact(db, groupId, {
         scope: result.scope,
         userId: result.userId ?? null,
         canonicalKey: result.canonicalKey,
@@ -254,9 +260,9 @@ async function runFactExtraction(
 
     // 先推進 watermark 再處理 embedding——embedding 失敗不應阻擋 watermark 前進，
     // 否則相同訊息會被重複萃取，導致 evidence_count 膨脹
-    deps.setFactWatermark(db, factExtractionStartTime)
+    deps.setFactWatermark(db, groupId, factExtractionStartTime)
     if (results.length > 0) {
-      await deps.processNewFactEmbeddings(vectorStore, db, config)
+      await deps.processNewFactEmbeddings(vectorStore, db, groupId, config)
     }
   }
   catch (err) {
@@ -306,12 +312,13 @@ function collectPinnedFacts(
  */
 export async function runObserver(
   db: DB,
+  groupId: string,
   vectorStore: VectorStore,
   config: Config,
   deps: ObserverDeps = defaultDeps,
 ): Promise<void> {
   // ── 1) 應否觸發 Observer ──
-  if (!shouldRun(db, config)) {
+  if (!shouldRun(db, groupId, config)) {
     observerLog.debug('Observer skipped (threshold not met)')
     return
   }
@@ -320,18 +327,18 @@ export async function runObserver(
 
   // 在頂層擷取 watermark 並傳遞給兩個 compress 函式，
   // 避免 compressGroupSummary 更新 updated_at 後影響 compressUserSummaries 讀到的 watermark
-  const watermark = getWatermark(db)
-  const userIds = deps.getDistinctUserIds(db, watermark)
+  const watermark = getWatermark(db, groupId)
+  const userIds = deps.getDistinctUserIds(db, groupId, watermark)
 
   // ── 2) Facts 萃取 ──
-  const allActiveFacts = await runFactExtraction(db, vectorStore, config, deps)
+  const allActiveFacts = await runFactExtraction(db, groupId, vectorStore, config, deps)
 
   // ── 3) 收集 pinned facts，執行摘要壓縮 ──
   const { groupPinnedText, userPinnedTextMap } = collectPinnedFacts(allActiveFacts, userIds)
 
-  await compressGroupSummary(db, watermark, config, deps, groupPinnedText)
+  await compressGroupSummary(db, groupId, watermark, config, deps, groupPinnedText)
 
   if (userIds.length > 0) {
-    await compressUserSummaries(db, watermark, userIds, config, deps, userPinnedTextMap)
+    await compressUserSummaries(db, groupId, watermark, userIds, config, deps, userPinnedTextMap)
   }
 }

@@ -32,9 +32,9 @@ test('saveMessage - 儲存訊息並驗證內容', () => {
     isMention: false,
   }
 
-  saveMessage(db, message)
+  saveMessage(db, 'group-a', message)
 
-  const stored = getRecentMessages(db, 10)
+  const stored = getRecentMessages(db, 'group-a', 10)
   expect(stored).toHaveLength(1)
   expect(stored[0].content).toBe('Hello world')
   expect(stored[0].userId).toBe('user-1')
@@ -44,9 +44,9 @@ test('saveMessage - 儲存訊息並驗證內容', () => {
 test('saveBotMessage - 儲存機器人訊息並驗證 isBot=true', () => {
   const { db } = makeDb()
 
-  saveBotMessage(db, 'Bot response')
+  saveBotMessage(db, 'group-a', 'Bot response')
 
-  const stored = getRecentMessages(db, 10)
+  const stored = getRecentMessages(db, 'group-a', 10)
   expect(stored).toHaveLength(1)
   expect(stored[0].content).toBe('Bot response')
   expect(stored[0].isBot).toBe(true)
@@ -70,10 +70,10 @@ test('getRecentMessages - 取得最近訊息並按時間倒序', () => {
       isBot: false,
       isMention: false,
     }
-    saveMessage(db, message)
+    saveMessage(db, 'group-a', message)
   }
 
-  const recent = getRecentMessages(db, 3)
+  const recent = getRecentMessages(db, 'group-a', 3)
   expect(recent).toHaveLength(3)
   // 應該按時間倒序（最新的在前）
   expect(recent[0].content).toBe('Message 4')
@@ -98,12 +98,12 @@ test('getMessagesSince - 取得指定時間之後的訊息', () => {
       isBot: false,
       isMention: false,
     }
-    saveMessage(db, message)
+    saveMessage(db, 'group-a', message)
   }
 
   // 取得 2024-01-01T00:00:02Z 之後的訊息
   const since = new Date(baseTime.getTime() + 2000)
-  const messages = getMessagesSince(db, since)
+  const messages = getMessagesSince(db, 'group-a', since)
 
   expect(messages).toHaveLength(2)
   expect(messages[0].content).toBe('Message 4')
@@ -151,16 +151,16 @@ test('getMessagesByUser - 取得特定使用者的訊息', () => {
     isMention: false,
   }
 
-  saveMessage(db, message1)
-  saveMessage(db, message2)
-  saveMessage(db, message3)
+  saveMessage(db, 'group-a', message1)
+  saveMessage(db, 'group-a', message2)
+  saveMessage(db, 'group-a', message3)
 
-  const aliceMessages = getMessagesByUser(db, 'user-1', 10)
+  const aliceMessages = getMessagesByUser(db, 'group-a', 'user-1', 10)
   expect(aliceMessages).toHaveLength(2)
   expect(aliceMessages[0].content).toBe('Alice message 2')
   expect(aliceMessages[1].content).toBe('Alice message 1')
 
-  const bobMessages = getMessagesByUser(db, 'user-2', 10)
+  const bobMessages = getMessagesByUser(db, 'group-a', 'user-2', 10)
   expect(bobMessages).toHaveLength(1)
   expect(bobMessages[0].content).toBe('Bob message 1')
 })
@@ -181,10 +181,10 @@ test('getMessageCount - 計算訊息總數', () => {
       isBot: false,
       isMention: false,
     }
-    saveMessage(db, message)
+    saveMessage(db, 'group-a', message)
   }
 
-  expect(getMessageCount(db)).toBe(3)
+  expect(getMessageCount(db, 'group-a')).toBe(3)
 })
 
 test('混合操作 - 儲存、查詢、計數', () => {
@@ -203,16 +203,16 @@ test('混合操作 - 儲存、查詢、計數', () => {
     isBot: false,
     isMention: false,
   }
-  saveMessage(db, userMessage)
+  saveMessage(db, 'group-a', userMessage)
 
   // 儲存機器人訊息
-  saveBotMessage(db, 'Bot response')
+  saveBotMessage(db, 'group-a', 'Bot response')
 
   // 驗證總數
-  expect(getMessageCount(db)).toBe(2)
+  expect(getMessageCount(db, 'group-a')).toBe(2)
 
   // 驗證最近訊息
-  const recent = getRecentMessages(db, 10)
+  const recent = getRecentMessages(db, 'group-a', 10)
   expect(recent).toHaveLength(2)
 
   // 驗證有一個 bot 訊息和一個使用者訊息
@@ -224,7 +224,7 @@ test('混合操作 - 儲存、查詢、計數', () => {
   expect(userMessages[0].content).toBe('User message')
 
   // 驗證使用者訊息
-  const userMsgs = getMessagesByUser(db, 'user-1', 10)
+  const userMsgs = getMessagesByUser(db, 'group-a', 'user-1', 10)
   expect(userMsgs).toHaveLength(1)
   expect(userMsgs[0].content).toBe('User message')
 })
@@ -245,10 +245,29 @@ test('時間戳精度 - 毫秒級別', () => {
     isMention: false,
   }
 
-  saveMessage(db, message)
+  saveMessage(db, 'group-a', message)
 
-  const stored = getRecentMessages(db, 10)
+  const stored = getRecentMessages(db, 'group-a', 10)
   expect(stored[0].timestamp).toBe(now.getTime())
+})
+
+test('cross-group isolation — group-a 訊息在 group-b 不可見', () => {
+  const { db } = makeDb()
+  const now = new Date()
+  const msg: UnifiedMessage = {
+    id: 'msg-1',
+    groupId: 'group-a',
+    userId: 'user-1',
+    userName: 'Alice',
+    content: 'Hello',
+    timestamp: now,
+    platform: 'discord',
+    isBot: false,
+    isMention: false,
+  }
+  saveMessage(db, 'group-a', msg)
+  expect(getRecentMessages(db, 'group-a', 10)).toHaveLength(1)
+  expect(getRecentMessages(db, 'group-b', 10)).toHaveLength(0)
 })
 
 test('saveMessage - replyToExternalId 있을 때 DB에 정확히 저장됨', () => {
@@ -268,7 +287,7 @@ test('saveMessage - replyToExternalId 있을 때 DB에 정확히 저장됨', () 
     replyToExternalId: 'original-id',
   }
 
-  saveMessage(db, message)
+  saveMessage(db, 'g1', message)
 
   const rows = db
     .select()
@@ -294,7 +313,7 @@ test('saveMessage - replyToExternalId 없을 때 null로 저장됨', () => {
     isMention: false,
   }
 
-  saveMessage(db, message)
+  saveMessage(db, 'g1', message)
 
   const rows = db
     .select()

@@ -4,8 +4,8 @@ import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
 import { createTestConfig } from '../__tests__/helpers/config.ts'
 import { setupTestDb } from '../__tests__/helpers/setup-db.ts'
 import { embedText, processNewChunks } from './embedding'
-import * as schema from './schema'
-import { SqliteVectorStore } from './sqlite-vector-store'
+import * as schema from '../storage/schema'
+import { SqliteVectorStore } from '../storage/sqlite-vector-store'
 
 /** 測試用 Config（4 維向量，簡化測試） */
 const mockConfig = createTestConfig({
@@ -212,7 +212,7 @@ test('processNewChunks 無訊息時不插入向量', async () => {
   store.init(4)
   const fakeDeps = createFakeDeps()
 
-  await processNewChunks(store, drizzleDb, mockConfig, fakeDeps)
+  await processNewChunks(store, drizzleDb, 'group-a', mockConfig, fakeDeps)
 
   const results = store.searchChunks([0.1, 0.2, 0.3, 0.4], 100, 999)
   expect(results).toEqual([])
@@ -227,11 +227,11 @@ test('processNewChunks 正確處理訊息並插入 chunk 向量', async () => {
 
   // 插入 2 則訊息到 DB
   drizzleDb.insert(schema.messages).values([
-    { userId: 'u1', content: '第一則訊息', isBot: false, timestamp: 1000, externalId: null, replyToExternalId: null },
-    { userId: 'u2', content: '第二則訊息', isBot: false, timestamp: 2000, externalId: null, replyToExternalId: null },
+    { groupId: 'group-a', userId: 'u1', content: '第一則訊息', isBot: false, timestamp: 1000, externalId: null, replyToExternalId: null },
+    { groupId: 'group-a', userId: 'u2', content: '第二則訊息', isBot: false, timestamp: 2000, externalId: null, replyToExternalId: null },
   ]).run()
 
-  await processNewChunks(store, drizzleDb, mockConfig, fakeDeps)
+  await processNewChunks(store, drizzleDb, 'group-a', mockConfig, fakeDeps)
 
   // chunks 表應有資料
   const chunkCount = sqlite.prepare('SELECT COUNT(*) as cnt FROM chunks').get() as { cnt: number }

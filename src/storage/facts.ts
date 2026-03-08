@@ -16,12 +16,13 @@ export interface FactUpsert {
 export type Fact = typeof schema.facts.$inferSelect
 
 /** 取得指定用戶的所有 facts（依 status 過濾） */
-export function getFactsByUser(db: DB, userId: string, status = 'active'): Fact[] {
+export function getFactsByUser(db: DB, groupId: string, userId: string, status = 'active'): Fact[] {
   return db
     .select()
     .from(schema.facts)
     .where(
       and(
+        eq(schema.facts.groupId, groupId),
         eq(schema.facts.scope, 'user'),
         eq(schema.facts.userId, userId),
         eq(schema.facts.status, status),
@@ -31,12 +32,13 @@ export function getFactsByUser(db: DB, userId: string, status = 'active'): Fact[
 }
 
 /** 取得所有群組層級的 facts（依 status 過濾） */
-export function getGroupFacts(db: DB, status = 'active'): Fact[] {
+export function getGroupFacts(db: DB, groupId: string, status = 'active'): Fact[] {
   return db
     .select()
     .from(schema.facts)
     .where(
       and(
+        eq(schema.facts.groupId, groupId),
         eq(schema.facts.scope, 'group'),
         eq(schema.facts.status, status),
       ),
@@ -45,12 +47,13 @@ export function getGroupFacts(db: DB, status = 'active'): Fact[] {
 }
 
 /** 取得釘選的 facts（群組釘選 + 指定用戶的釘選） */
-export function getPinnedFacts(db: DB, userId?: string): Fact[] {
+export function getPinnedFacts(db: DB, groupId: string, userId?: string): Fact[] {
   const groupPinned = db
     .select()
     .from(schema.facts)
     .where(
       and(
+        eq(schema.facts.groupId, groupId),
         eq(schema.facts.scope, 'group'),
         eq(schema.facts.pinned, true),
         eq(schema.facts.status, 'active'),
@@ -66,6 +69,7 @@ export function getPinnedFacts(db: DB, userId?: string): Fact[] {
     .from(schema.facts)
     .where(
       and(
+        eq(schema.facts.groupId, groupId),
         eq(schema.facts.scope, 'user'),
         eq(schema.facts.userId, userId),
         eq(schema.facts.pinned, true),
@@ -78,11 +82,11 @@ export function getPinnedFacts(db: DB, userId?: string): Fact[] {
 }
 
 /**
- * Upsert fact：以 (canonical_key, scope, user_id) 為唯一鍵
+ * Upsert fact：以 (group_id, canonical_key, scope, user_id) 為唯一鍵
  * 已存在 → 更新 content/confidence/status + evidence_count++
  * 不存在 → 插入新 fact
  */
-export function upsertFact(db: DB, fact: FactUpsert): void {
+export function upsertFact(db: DB, groupId: string, fact: FactUpsert): void {
   const userId = fact.userId ?? null
 
   // 查找既有 active fact：需處理 user_id 為 null 的情況
@@ -92,6 +96,7 @@ export function upsertFact(db: DB, fact: FactUpsert): void {
     .from(schema.facts)
     .where(
       and(
+        eq(schema.facts.groupId, groupId),
         eq(schema.facts.canonicalKey, fact.canonicalKey),
         eq(schema.facts.scope, fact.scope),
         userId === null
@@ -120,6 +125,7 @@ export function upsertFact(db: DB, fact: FactUpsert): void {
   else {
     db.insert(schema.facts)
       .values({
+        groupId,
         scope: fact.scope,
         userId,
         canonicalKey: fact.canonicalKey,
@@ -136,41 +142,41 @@ export function upsertFact(db: DB, fact: FactUpsert): void {
 }
 
 /** 將指定 fact 標記為 superseded */
-export function supersedeFact(db: DB, factId: number): void {
+export function supersedeFact(db: DB, groupId: string, factId: number): void {
   db.update(schema.facts)
     .set({
       status: 'superseded',
       updatedAt: Date.now(),
     })
-    .where(eq(schema.facts.id, factId))
+    .where(and(eq(schema.facts.groupId, groupId), eq(schema.facts.id, factId)))
     .run()
 }
 
 /** 取得所有 active 的 facts（供 fact extraction context 使用） */
-export function getAllActiveFacts(db: DB): Fact[] {
+export function getAllActiveFacts(db: DB, groupId: string): Fact[] {
   return db
     .select()
     .from(schema.facts)
-    .where(eq(schema.facts.status, 'active'))
+    .where(and(eq(schema.facts.groupId, groupId), eq(schema.facts.status, 'active')))
     .all()
 }
 
 /** 取得 fact extraction watermark 時間戳（未設定則回傳 0） */
-export function getFactWatermark(db: DB): number {
+export function getFactWatermark(db: DB, groupId: string): number {
   return db
     .select()
     .from(schema.factMetadata)
-    .where(eq(schema.factMetadata.key, 'fact_watermark'))
+    .where(and(eq(schema.factMetadata.groupId, groupId), eq(schema.factMetadata.key, 'fact_watermark')))
     .get()
     ?.value ?? 0
 }
 
 /** 設定 fact extraction watermark 時間戳 */
-export function setFactWatermark(db: DB, timestamp: number): void {
+export function setFactWatermark(db: DB, groupId: string, timestamp: number): void {
   db.insert(schema.factMetadata)
-    .values({ key: 'fact_watermark', value: timestamp })
+    .values({ groupId, key: 'fact_watermark', value: timestamp })
     .onConflictDoUpdate({
-      target: schema.factMetadata.key,
+      target: [schema.factMetadata.groupId, schema.factMetadata.key],
       set: { value: timestamp },
     })
     .run()

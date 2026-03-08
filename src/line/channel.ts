@@ -246,6 +246,11 @@ export class LineChannel implements PlatformChannel {
 
     const isMention = this.checkIsMention(event.message)
 
+    // 提取 LINE 圖片訊息 attachment（僅 image 類型有 platformImageId）
+    const imageAttachments = event.message.type === 'image'
+      ? [{ platformImageId: event.message.id, contentType: 'image/jpeg' }]
+      : []
+
     const unifiedMessage: UnifiedMessage = {
       id: event.message.id,
       groupId,
@@ -258,6 +263,7 @@ export class LineChannel implements PlatformChannel {
       isMention,
       raw: event,
       replyToExternalId: event.message.quotedMessageId,
+      ...(imageAttachments.length > 0 && { images: imageAttachments }),
     }
 
     this.onMessage(unifiedMessage)

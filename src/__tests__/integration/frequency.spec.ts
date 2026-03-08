@@ -83,6 +83,8 @@ function createTestServices(overrides: Partial<AgentServices> = {}) {
     processNewChunks: (mock(async () => {}) as unknown) as AgentServices['processNewChunks'],
     recordActivity: (mock(() => {}) as unknown) as AgentServices['recordActivity'],
     checkFrequency: checkFrequencyMock as unknown as AgentServices['checkFrequency'],
+    analyzeImage: (mock(async () => 'mock image analysis') as unknown) as AgentServices['analyzeImage'],
+    getImageById: (mock((_db, _groupId, _id) => null) as unknown) as AgentServices['getImageById'],
     getOrCreateAlias: (mock(async () => ({ alias: 'test_alias', userName: 'TestUser' })) as unknown) as AgentServices['getOrCreateAlias'],
     getAliasMap: (mock(async () => new Map()) as unknown) as AgentServices['getAliasMap'],
     ...overrides,
@@ -182,7 +184,7 @@ describe('Frequency pipeline 整合測試', () => {
 
     await agent.processTriggeredMessages('discord', false)
 
-    const state = getFrequencyState(db)
+    const state = getFrequencyState(db, 'group-a')
     expect(state).toBeDefined()
     expect(state?.emaLongBot).toBeGreaterThan(0)
   })
@@ -193,7 +195,7 @@ describe('Frequency pipeline 整合測試', () => {
 
     const { services, mocks } = createTestServices({
       checkFrequency: (mock((...args: unknown[]) => {
-        const isMention = args[2] === true
+        const isMention = args[3] === true
         return {
           shouldRespond: isMention,
           probability: isMention ? 1 : 0.05,

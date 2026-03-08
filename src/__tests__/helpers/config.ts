@@ -11,7 +11,7 @@ export function createTestConfig(overrides: Partial<Config> = {}): Config {
 
     // ── 人格與基本設定 ──
     SOUL: 'test soul',
-    DB_DIR: '/tmp/test-groups/',
+    DB_PATH: '/tmp/test-groups/',
     DISCORD_GROUP_ID_MODE: 'guild',
     LINE_WEBHOOK_PORT: 3000,
     HEALTH_PORT: 3000,
@@ -55,6 +55,12 @@ export function createTestConfig(overrides: Partial<Config> = {}): Config {
     OBSERVER_MESSAGE_THRESHOLD: 50,
     OBSERVER_USER_MESSAGE_LIMIT: 50,
 
+    // ── Vision ──
+    VISION_MODEL: undefined,
+    IMAGE_MAX_DIMENSION: 512,
+    IMAGE_QUALITY: 65,
+    IMAGE_MAX_DOWNLOAD_SIZE_MB: 20,
+
     // ── Delivery ──
     DELIVERY_DISCORD_MAX_LENGTH: 2000,
     DELIVERY_LINE_MAX_LENGTH: 5000,
@@ -79,6 +85,7 @@ export function createTestConfig(overrides: Partial<Config> = {}): Config {
     discordEnabled: false,
     lineEnabled: false,
     embeddingEnabled: false,
+    visionEnabled: false,
 
     ...overrides,
   }

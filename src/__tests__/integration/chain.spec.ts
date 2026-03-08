@@ -116,6 +116,8 @@ function createChainServices(overrides: Partial<AgentServices> = {}): AgentServi
         reason: 'pass',
       },
     })) as unknown) as AgentServices['checkFrequency'],
+    analyzeImage: (mock(async () => 'mock image analysis') as unknown) as AgentServices['analyzeImage'],
+    getImageById: (mock((_db, _groupId, _id) => null) as unknown) as AgentServices['getImageById'],
     // No-op 背景任務
     runObserver: (mock(async () => {}) as unknown) as AgentServices['runObserver'],
     processNewChunks: (mock(async () => {}) as unknown) as AgentServices['processNewChunks'],
@@ -140,14 +142,12 @@ describe('T1-CHAIN: 完整鏈路整合測試', () => {
   test('CH-1: 訊息 → silence trigger → scheduler claim → AI reply → channel.sendMessage', async () => {
     const tmpDir = makeTempDir()
     tempDirs.push(tmpDir)
-    const dbDir = path.join(tmpDir, 'groups')
-    mkdirSync(dbDir, { recursive: true })
-    const mainDbPath = path.join(tmpDir, 'main.db')
+    const dbPath = path.join(tmpDir, 'yamada.db')
 
     const services = createChainServices()
     const config = makeTestCfg()
 
-    const ctx = await bootstrap(config, { dbDir, mainDbPath, agentServices: services })
+    const ctx = await bootstrap(config, { dbPath, agentServices: services })
     const fakeChannel = makeFakeChannel('discord')
     await ctx.startChannels([fakeChannel])
 
@@ -174,14 +174,12 @@ describe('T1-CHAIN: 完整鏈路整合測試', () => {
   test('CH-2: @mention → urgent trigger → AI reply 正常投遞', async () => {
     const tmpDir = makeTempDir()
     tempDirs.push(tmpDir)
-    const dbDir = path.join(tmpDir, 'groups')
-    mkdirSync(dbDir, { recursive: true })
-    const mainDbPath = path.join(tmpDir, 'main.db')
+    const dbPath = path.join(tmpDir, 'yamada.db')
 
     const services = createChainServices()
     const config = makeTestCfg()
 
-    const ctx = await bootstrap(config, { dbDir, mainDbPath, agentServices: services })
+    const ctx = await bootstrap(config, { dbPath, agentServices: services })
     const fakeChannel = makeFakeChannel('discord')
     await ctx.startChannels([fakeChannel])
 
@@ -203,15 +201,13 @@ describe('T1-CHAIN: 完整鏈路整合測試', () => {
   test('CH-3: 溢出觸發 → 累積字元超過 OVERFLOW_CHARS 時立即處理', async () => {
     const tmpDir = makeTempDir()
     tempDirs.push(tmpDir)
-    const dbDir = path.join(tmpDir, 'groups')
-    mkdirSync(dbDir, { recursive: true })
-    const mainDbPath = path.join(tmpDir, 'main.db')
+    const dbPath = path.join(tmpDir, 'yamada.db')
 
     const services = createChainServices()
     // OVERFLOW_CHARS = 100，一次送超過 100 字元
     const config = makeTestCfg({ DEBOUNCE_OVERFLOW_CHARS: 100, DEBOUNCE_SILENCE_MS: 60_000 })
 
-    const ctx = await bootstrap(config, { dbDir, mainDbPath, agentServices: services })
+    const ctx = await bootstrap(config, { dbPath, agentServices: services })
     const fakeChannel = makeFakeChannel('discord')
     await ctx.startChannels([fakeChannel])
 
@@ -230,9 +226,7 @@ describe('T1-CHAIN: 完整鏈路整合測試', () => {
   test('CH-4: skip action → 不呼叫 sendMessage，不儲存 bot 訊息', async () => {
     const tmpDir = makeTempDir()
     tempDirs.push(tmpDir)
-    const dbDir = path.join(tmpDir, 'groups')
-    mkdirSync(dbDir, { recursive: true })
-    const mainDbPath = path.join(tmpDir, 'main.db')
+    const dbPath = path.join(tmpDir, 'yamada.db')
 
     const services = createChainServices({
       generateReply: (mock(async () => ({
@@ -242,7 +236,7 @@ describe('T1-CHAIN: 完整鏈路整合測試', () => {
     })
     const config = makeTestCfg()
 
-    const ctx = await bootstrap(config, { dbDir, mainDbPath, agentServices: services })
+    const ctx = await bootstrap(config, { dbPath, agentServices: services })
     const fakeChannel = makeFakeChannel('discord')
     await ctx.startChannels([fakeChannel])
 
@@ -254,8 +248,7 @@ describe('T1-CHAIN: 完整鏈路整合測試', () => {
     expect(sendMock.mock.calls.length).toBe(0)
 
     // 驗證 DB 中沒有 bot 訊息
-    const { db } = ctx.manager.getOrCreate('skip-group')
-    const messages = getRecentMessages(db, 20)
+    const messages = getRecentMessages(ctx.appDb.db, 'skip-group', 20)
     const botMsgs = messages.filter(m => m.isBot)
     expect(botMsgs.length).toBe(0)
 
@@ -265,14 +258,12 @@ describe('T1-CHAIN: 完整鏈路整合測試', () => {
   test('CH-5: 全鏈路 DB 持久化 — 用戶訊息 + bot 回覆皆存在於 per-group DB', async () => {
     const tmpDir = makeTempDir()
     tempDirs.push(tmpDir)
-    const dbDir = path.join(tmpDir, 'groups')
-    mkdirSync(dbDir, { recursive: true })
-    const mainDbPath = path.join(tmpDir, 'main.db')
+    const dbPath = path.join(tmpDir, 'yamada.db')
 
     const services = createChainServices()
     const config = makeTestCfg()
 
-    const ctx = await bootstrap(config, { dbDir, mainDbPath, agentServices: services })
+    const ctx = await bootstrap(config, { dbPath, agentServices: services })
     const fakeChannel = makeFakeChannel('discord')
     await ctx.startChannels([fakeChannel])
 
@@ -280,8 +271,7 @@ describe('T1-CHAIN: 完整鏈路整合測試', () => {
     await sleep(300)
 
     // 驗證 per-group DB 包含用戶訊息和 bot 回覆
-    const { db } = ctx.manager.getOrCreate('persist-group')
-    const messages = getRecentMessages(db, 20)
+    const messages = getRecentMessages(ctx.appDb.db, 'persist-group', 20)
 
     const userMsgs = messages.filter(m => !m.isBot)
     expect(userMsgs.length).toBeGreaterThanOrEqual(1)
@@ -297,14 +287,12 @@ describe('T1-CHAIN: 完整鏈路整合測試', () => {
   test('CH-6: trigger 完成後新訊息建立新 trigger → 可再次觸發 AI pipeline', async () => {
     const tmpDir = makeTempDir()
     tempDirs.push(tmpDir)
-    const dbDir = path.join(tmpDir, 'groups')
-    mkdirSync(dbDir, { recursive: true })
-    const mainDbPath = path.join(tmpDir, 'main.db')
+    const dbPath = path.join(tmpDir, 'yamada.db')
 
     const services = createChainServices()
     const config = makeTestCfg()
 
-    const ctx = await bootstrap(config, { dbDir, mainDbPath, agentServices: services })
+    const ctx = await bootstrap(config, { dbPath, agentServices: services })
     const fakeChannel = makeFakeChannel('discord')
     await ctx.startChannels([fakeChannel])
 
@@ -340,9 +328,7 @@ describe('T2-TRIGGER: handleMessage → trigger 狀態整合測試', () => {
   test('TR-1: isMention sticky — 先非 mention 再 mention → trigger 帶 is_mention=1', async () => {
     const tmpDir = makeTempDir()
     tempDirs.push(tmpDir)
-    const dbDir = path.join(tmpDir, 'groups')
-    mkdirSync(dbDir, { recursive: true })
-    const mainDbPath = path.join(tmpDir, 'main.db')
+    const dbPath = path.join(tmpDir, 'yamada.db')
 
     // 用 fake scheduler 避免自動觸發，只驗證 trigger 狀態
     const fakeSchedulerFactory = mock((): { start: () => void, stop: () => Promise<void> } => ({
@@ -353,8 +339,7 @@ describe('T2-TRIGGER: handleMessage → trigger 狀態整合測試', () => {
     const config = makeTestCfg({ DEBOUNCE_SILENCE_MS: 60_000 })
 
     const ctx = await bootstrap(config, {
-      dbDir,
-      mainDbPath,
+      dbPath,
       agentServices: services,
       createScheduler: fakeSchedulerFactory as Parameters<typeof bootstrap>[1] extends infer O ? O extends { createScheduler?: infer F } ? F : never : never,
     })
@@ -367,7 +352,7 @@ describe('T2-TRIGGER: handleMessage → trigger 狀態整合測試', () => {
     fakeChannel.onMessage(makeMessage({ groupId: 'sticky-group', content: 'hey', isMention: true }))
 
     // 驗證 trigger 的 is_mention 為 sticky（MAX）
-    const sqlite = new Database(mainDbPath, { readonly: true })
+    const sqlite = new Database(dbPath, { readonly: true })
     const row = sqlite.query('SELECT is_mention, pending_chars FROM pending_triggers WHERE group_id = ?').get('sticky-group') as { is_mention: number, pending_chars: number } | null
     sqlite.close()
 
@@ -381,9 +366,7 @@ describe('T2-TRIGGER: handleMessage → trigger 狀態整合測試', () => {
   test('TR-2: 非 mention 訊息不清除已有的 mention flag', async () => {
     const tmpDir = makeTempDir()
     tempDirs.push(tmpDir)
-    const dbDir = path.join(tmpDir, 'groups')
-    mkdirSync(dbDir, { recursive: true })
-    const mainDbPath = path.join(tmpDir, 'main.db')
+    const dbPath = path.join(tmpDir, 'yamada.db')
 
     const fakeSchedulerFactory = mock(() => ({
       start: () => {},
@@ -393,8 +376,7 @@ describe('T2-TRIGGER: handleMessage → trigger 狀態整合測試', () => {
     const config = makeTestCfg({ DEBOUNCE_SILENCE_MS: 60_000 })
 
     const ctx = await bootstrap(config, {
-      dbDir,
-      mainDbPath,
+      dbPath,
       agentServices: services,
       createScheduler: fakeSchedulerFactory as Parameters<typeof bootstrap>[1] extends infer O ? O extends { createScheduler?: infer F } ? F : never : never,
     })
@@ -406,7 +388,7 @@ describe('T2-TRIGGER: handleMessage → trigger 狀態整合測試', () => {
     fakeChannel.onMessage(makeMessage({ groupId: 'persist-mention', content: 'b', isMention: false }))
     fakeChannel.onMessage(makeMessage({ groupId: 'persist-mention', content: 'c', isMention: false }))
 
-    const sqlite = new Database(mainDbPath, { readonly: true })
+    const sqlite = new Database(dbPath, { readonly: true })
     const row = sqlite.query('SELECT is_mention FROM pending_triggers WHERE group_id = ?').get('persist-mention') as { is_mention: number } | null
     sqlite.close()
 
@@ -420,9 +402,7 @@ describe('T2-TRIGGER: handleMessage → trigger 狀態整合測試', () => {
   test('TR-3: 多則訊息累積 pending_chars 正確', async () => {
     const tmpDir = makeTempDir()
     tempDirs.push(tmpDir)
-    const dbDir = path.join(tmpDir, 'groups')
-    mkdirSync(dbDir, { recursive: true })
-    const mainDbPath = path.join(tmpDir, 'main.db')
+    const dbPath = path.join(tmpDir, 'yamada.db')
 
     const fakeSchedulerFactory = mock(() => ({
       start: () => {},
@@ -432,8 +412,7 @@ describe('T2-TRIGGER: handleMessage → trigger 狀態整合測試', () => {
     const config = makeTestCfg({ DEBOUNCE_SILENCE_MS: 60_000 })
 
     const ctx = await bootstrap(config, {
-      dbDir,
-      mainDbPath,
+      dbPath,
       agentServices: services,
       createScheduler: fakeSchedulerFactory as Parameters<typeof bootstrap>[1] extends infer O ? O extends { createScheduler?: infer F } ? F : never : never,
     })
@@ -445,7 +424,7 @@ describe('T2-TRIGGER: handleMessage → trigger 狀態整合測試', () => {
     fakeChannel.onMessage(makeMessage({ groupId: 'accum-group', content: 'BBBBB' }))      // 5 chars
     fakeChannel.onMessage(makeMessage({ groupId: 'accum-group', content: 'CCCCCCCC' }))   // 8 chars
 
-    const sqlite = new Database(mainDbPath, { readonly: true })
+    const sqlite = new Database(dbPath, { readonly: true })
     const row = sqlite.query('SELECT pending_chars FROM pending_triggers WHERE group_id = ?').get('accum-group') as { pending_chars: number } | null
     sqlite.close()
 

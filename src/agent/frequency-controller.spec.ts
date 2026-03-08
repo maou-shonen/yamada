@@ -10,7 +10,7 @@ describe('checkFrequency', () => {
 
   test('mention bypass：isMention=true 時直接通過', () => {
     const { db } = setupTestDb()
-    const result = checkFrequency(db, createTestConfig(), true)
+    const result = checkFrequency(db, 'group-a', createTestConfig(), true)
 
     expect(result.shouldRespond).toBeTrue()
     expect(result.probability).toBe(1)
@@ -22,7 +22,7 @@ describe('checkFrequency', () => {
     const { db } = setupTestDb()
     const config = createTestConfig({ FREQUENCY_ENABLED: false })
 
-    const result = checkFrequency(db, config, false)
+    const result = checkFrequency(db, 'group-a', config, false)
 
     expect(result.shouldRespond).toBeTrue()
     expect(result.probability).toBe(1)
@@ -33,7 +33,7 @@ describe('checkFrequency', () => {
     const { db } = setupTestDb()
     const now = 1_700_000_000_000
 
-    saveFrequencyState(db, {
+    saveFrequencyState(db, 'group-a', {
       emaLongBot: 8,
       emaLongTotal: 10,
       emaShortBot: 8,
@@ -41,7 +41,7 @@ describe('checkFrequency', () => {
       lastUpdatedAt: now,
     })
 
-    const result = checkFrequency(db, createTestConfig(), false, {
+    const result = checkFrequency(db, 'group-a', createTestConfig(), false, {
       now: () => now,
       random: () => 0.9,
       countActiveMembers: () => 4,
@@ -57,7 +57,7 @@ describe('checkFrequency', () => {
     const { db } = setupTestDb()
     const now = 1_700_000_000_000
 
-    saveFrequencyState(db, {
+    saveFrequencyState(db, 'group-a', {
       emaLongBot: 0,
       emaLongTotal: 10,
       emaShortBot: 0,
@@ -65,7 +65,7 @@ describe('checkFrequency', () => {
       lastUpdatedAt: now,
     })
 
-    const result = checkFrequency(db, createTestConfig(), false, {
+    const result = checkFrequency(db, 'group-a', createTestConfig(), false, {
       now: () => now,
       random: () => 0.1,
       countActiveMembers: () => 4,
@@ -80,7 +80,7 @@ describe('checkFrequency', () => {
   test('冷啟動：無 frequency_state 也可計算且機率在界內', () => {
     const { db } = setupTestDb()
 
-    const result = checkFrequency(db, createTestConfig(), false, {
+    const result = checkFrequency(db, 'group-a', createTestConfig(), false, {
       now: () => 1_700_000_000_000,
       random: () => 0.4,
       countActiveMembers: () => 4,
@@ -94,7 +94,7 @@ describe('checkFrequency', () => {
   test('metadata 完整性：包含所有必要欄位', () => {
     const { db } = setupTestDb()
 
-    const result = checkFrequency(db, createTestConfig(), false, {
+    const result = checkFrequency(db, 'group-a', createTestConfig(), false, {
       now: () => 1_700_000_000_000,
       random: () => 0.2,
       countActiveMembers: () => 3,
@@ -114,7 +114,7 @@ describe('checkFrequency', () => {
   test('結構化 log：metadata 包含所有必要欄位', () => {
     const { db } = setupTestDb()
 
-    const result = checkFrequency(db, createTestConfig(), false, {
+    const result = checkFrequency(db, 'group-a', createTestConfig(), false, {
       now: () => 1_700_000_000_000,
       random: () => 0.2,
       countActiveMembers: () => 2,
@@ -134,7 +134,7 @@ describe('checkFrequency', () => {
   test('solo_chat bypass：activeMembers = 1 時無條件通過', () => {
     const { db } = setupTestDb()
 
-    const result = checkFrequency(db, createTestConfig(), false, {
+    const result = checkFrequency(db, 'group-a', createTestConfig(), false, {
       now: () => 1_700_000_000_000,
       random: () => 0.99,
       countActiveMembers: () => 1,
@@ -150,7 +150,7 @@ describe('checkFrequency', () => {
   test('solo_chat bypass：activeMembers = 0 時也無條件通過', () => {
     const { db } = setupTestDb()
 
-    const result = checkFrequency(db, createTestConfig(), false, {
+    const result = checkFrequency(db, 'group-a', createTestConfig(), false, {
       now: () => 1_700_000_000_000,
       random: () => 0.99,
       countActiveMembers: () => 0,
@@ -165,7 +165,7 @@ describe('checkFrequency', () => {
     const { db } = setupTestDb()
     const config = createTestConfig({ FREQUENCY_MIN_TARGET: 0.1 })
 
-    const result = checkFrequency(db, config, false, {
+    const result = checkFrequency(db, 'group-a', config, false, {
       now: () => 1_700_000_000_000,
       random: () => 0.5,
       countActiveMembers: () => 50,

@@ -1,3 +1,6 @@
+// @deprecated — tests for deprecated main-db.ts functions.
+// Will be removed when T16 cleans up all main-db.ts imports.
+
 import { rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'

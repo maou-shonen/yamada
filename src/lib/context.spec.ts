@@ -1,6 +1,6 @@
 import type { Config } from '../config/index.ts'
 import type { VectorStore } from '../storage/vector-store'
-import type { StoredMessage } from '../types'
+import type { StoredImage, StoredMessage } from '../types'
 import type { ContextDeps } from './context'
 import { describe, expect, test } from 'bun:test'
 import { createTestConfig } from '../__tests__/helpers/config.ts'
@@ -45,6 +45,22 @@ function createFakeDeps(): ContextDeps {
     getChunkContents: (() => []) as unknown as ContextDeps['getChunkContents'],
     getAliasMap: (async () => new Map()) as unknown as ContextDeps['getAliasMap'],
     getAllActiveFacts: (() => []) as unknown as ContextDeps['getAllActiveFacts'],
+    getImagesForMessages: (() => new Map()) as unknown as ContextDeps['getImagesForMessages'],
+  }
+}
+
+function makeStoredImage(overrides: Partial<StoredImage> = {}): StoredImage {
+  return {
+    id: 1,
+    groupId: 'group-a',
+    messageId: 1,
+    description: 'A cat',
+    mimeType: 'image/webp',
+    width: 256,
+    height: 256,
+    createdAt: Date.now(),
+    thumbnail: new Uint8Array([1, 2, 3]),
+    ...overrides,
   }
 }
 
@@ -69,6 +85,7 @@ describe('assembleContext', () => {
       recentMessages: [],
       config,
       db,
+      groupId: 'group-a',
       vectorStore: createFakeVectorStore(),
       deps,
     })
@@ -90,6 +107,7 @@ describe('assembleContext', () => {
       recentMessages: [msg],
       config,
       db,
+      groupId: 'group-a',
       vectorStore: createFakeVectorStore(),
       deps,
     })
@@ -109,6 +127,7 @@ describe('assembleContext', () => {
       recentMessages: [msg],
       config,
       db,
+      groupId: 'group-a',
       vectorStore: createFakeVectorStore(),
       deps,
     })
@@ -120,7 +139,7 @@ describe('assembleContext', () => {
 
   test('Group Summary 以 <group_summary> 包裹出現在 system prompt', async () => {
     const { sqlite, db } = setupTestDb()
-    sqlite.exec(`INSERT INTO group_summaries(id, summary, updated_at) VALUES('singleton','聊天室主要討論技術',${Date.now()})`)
+    sqlite.exec(`INSERT INTO group_summaries(group_id, summary, updated_at) VALUES('group-a','聊天室主要討論技術',${Date.now()})`)
     const config = makeConfig()
     const deps = createFakeDeps()
 
@@ -128,6 +147,7 @@ describe('assembleContext', () => {
       recentMessages: [],
       config,
       db,
+      groupId: 'group-a',
       vectorStore: createFakeVectorStore(),
       deps,
     })
@@ -139,7 +159,7 @@ describe('assembleContext', () => {
 
   test('User Summaries 以 <user_profiles> 包裹出現在 system prompt', async () => {
     const { sqlite, db } = setupTestDb()
-    sqlite.exec(`INSERT INTO user_summaries(id, user_id, summary, updated_at) VALUES('us1','user1','Alice 是工程師',${Date.now()})`)
+    sqlite.exec(`INSERT INTO user_summaries(group_id, user_id, summary, updated_at) VALUES('group-a','user1','Alice 是工程師',${Date.now()})`)
     const config = makeConfig()
     const msg = makeMessage({ userId: 'user1' })
     const deps = createFakeDeps()
@@ -148,6 +168,7 @@ describe('assembleContext', () => {
       recentMessages: [msg],
       config,
       db,
+      groupId: 'group-a',
       vectorStore: createFakeVectorStore(),
       deps,
     })
@@ -170,6 +191,7 @@ describe('assembleContext', () => {
       recentMessages: [newer, older],
       config,
       db,
+      groupId: 'group-a',
       vectorStore: createFakeVectorStore(),
       deps,
     })
@@ -183,9 +205,9 @@ describe('assembleContext', () => {
   test('Token budget 裁剪優先序：先移除語義搜尋，保留用戶摘要', async () => {
     const { sqlite, db } = setupTestDb()
     // 插入用戶摘要
-    sqlite.exec(`INSERT INTO user_summaries(id, user_id, summary, updated_at) VALUES('us1','user1','Alice 是工程師',${Date.now()})`)
+    sqlite.exec(`INSERT INTO user_summaries(group_id, user_id, summary, updated_at) VALUES('group-a','user1','Alice 是工程師',${Date.now()})`)
     // 插入群組摘要
-    sqlite.exec(`INSERT INTO group_summaries(id, summary, updated_at) VALUES('singleton','聊天室主要討論技術',${Date.now()})`)
+    sqlite.exec(`INSERT INTO group_summaries(group_id, summary, updated_at) VALUES('group-a','聊天室主要討論技術',${Date.now()})`)
 
     // 設定 SOUL 和 CONTEXT_MAX_TOKENS 使得移除語義搜尋後剛好符合預算
     const soul = 'S'.repeat(50) // 50 chars
@@ -210,6 +232,7 @@ describe('assembleContext', () => {
       recentMessages: [msg],
       config,
       db,
+      groupId: 'group-a',
       vectorStore: fakeVectorStore,
       deps,
     })
@@ -223,9 +246,9 @@ describe('assembleContext', () => {
   test('Token budget 全部超支 → 語義搜尋和用戶摘要都被裁剪', async () => {
     const { sqlite, db } = setupTestDb()
     // 插入用戶摘要
-    sqlite.exec(`INSERT INTO user_summaries(id, user_id, summary, updated_at) VALUES('us1','user1','Alice 是工程師',${Date.now()})`)
+    sqlite.exec(`INSERT INTO user_summaries(group_id, user_id, summary, updated_at) VALUES('group-a','user1','Alice 是工程師',${Date.now()})`)
     // 插入群組摘要
-    sqlite.exec(`INSERT INTO group_summaries(id, summary, updated_at) VALUES('singleton','聊天室主要討論技術',${Date.now()})`)
+    sqlite.exec(`INSERT INTO group_summaries(group_id, summary, updated_at) VALUES('group-a','聊天室主要討論技術',${Date.now()})`)
 
     // 設定極小的 CONTEXT_MAX_TOKENS 使得兩個都被裁剪
     const soul = 'S'.repeat(100)
@@ -250,6 +273,7 @@ describe('assembleContext', () => {
       recentMessages: [msg],
       config,
       db,
+      groupId: 'group-a',
       vectorStore: fakeVectorStore,
       deps,
     })
@@ -273,6 +297,7 @@ describe('assembleContext', () => {
       recentMessages: [msg],
       config,
       db,
+      groupId: 'group-a',
       vectorStore: createFakeVectorStore(),
       deps,
     })
@@ -300,6 +325,7 @@ describe('assembleContext', () => {
       recentMessages: [msg],
       config,
       db,
+      groupId: 'group-a',
       vectorStore: createFakeVectorStore(),
       deps,
     })
@@ -328,6 +354,7 @@ describe('assembleContext', () => {
       recentMessages: [msg],
       config,
       db,
+      groupId: 'group-a',
       vectorStore: createFakeVectorStore(),
       deps,
     })
@@ -335,6 +362,36 @@ describe('assembleContext', () => {
     // 驗證：embedText 未被呼叫，system prompt 不含 <related_history>
     expect(embedTextCalled).toBe(false)
     expect(messages[0].content).not.toContain('<related_history>')
+  })
+
+  test('會載入圖片描述並注入近期訊息', async () => {
+    const { db } = setupTestDb()
+    const config = makeConfig({ embeddingEnabled: false })
+    const msg = makeMessage({ id: 42, userId: 'u1', content: '看看這個 [圖片]' })
+    let receivedGroupId = ''
+    let receivedMessageIds: number[] = []
+
+    const deps: ContextDeps = {
+      ...createFakeDeps(),
+      getImagesForMessages: ((_db, groupId, messageIds) => {
+        receivedGroupId = groupId
+        receivedMessageIds = messageIds
+        return new Map([[42, makeStoredImage({ messageId: 42, description: 'A cat' })]])
+      }) as ContextDeps['getImagesForMessages'],
+    }
+
+    const messages = await assembleContext({
+      recentMessages: [msg],
+      config,
+      db,
+      groupId: 'group-a',
+      vectorStore: createFakeVectorStore(),
+      deps,
+    })
+
+    expect(receivedGroupId).toBe('group-a')
+    expect(receivedMessageIds).toEqual([42])
+    expect(messages.find(message => message.role === 'user')?.content).toBe('u1: 看看這個 [圖片 #1: A cat]')
   })
 })
 
@@ -381,6 +438,50 @@ describe('buildChatMessages', () => {
     expect(result.length).toBe(2)
     expect(result.every(m => m.role === 'assistant')).toBe(true)
   })
+
+  test('有圖片描述時會把 [圖片] 替換為內嵌描述', () => {
+    const msg = makeMessage({ id: 11, userId: 'u1', content: '[圖片]' })
+    const imageMap = new Map([[11, makeStoredImage({ messageId: 11, description: 'A cat' })]])
+
+    const result = buildChatMessages([msg], new Map(), imageMap)
+
+    expect(result).toEqual([{ role: 'user', content: 'u1: [圖片 #1: A cat]' }])
+  })
+
+  test('圖片描述尚未生成時保留 [圖片]', () => {
+    const msg = makeMessage({ id: 12, userId: 'u1', content: '[圖片]' })
+    const imageMap = new Map([[12, makeStoredImage({ messageId: 12, description: null })]])
+
+    const result = buildChatMessages([msg], new Map(), imageMap)
+
+    expect(result).toEqual([{ role: 'user', content: 'u1: [圖片]' }])
+  })
+
+  test('文字加圖片時只替換內文中的 [圖片]', () => {
+    const msg = makeMessage({ id: 13, userId: 'u1', content: '看看這個 [圖片]' })
+    const imageMap = new Map([[13, makeStoredImage({ messageId: 13, description: 'A cat' })]])
+
+    const result = buildChatMessages([msg], new Map(), imageMap)
+
+    expect(result).toEqual([{ role: 'user', content: 'u1: 看看這個 [圖片 #1: A cat]' }])
+  })
+
+  test('未提供 imageMap 時維持原本格式', () => {
+    const msg = makeMessage({ id: 14, userId: 'u1', content: '[圖片]' })
+
+    const result = buildChatMessages([msg])
+
+    expect(result).toEqual([{ role: 'user', content: 'u1: [圖片]' }])
+  })
+
+  test('訊息不在 imageMap 時維持原本格式', () => {
+    const msg = makeMessage({ id: 15, userId: 'u1', content: '[圖片]' })
+    const imageMap = new Map([[999, makeStoredImage({ messageId: 999, description: 'A cat' })]])
+
+    const result = buildChatMessages([msg], new Map(), imageMap)
+
+    expect(result).toEqual([{ role: 'user', content: 'u1: [圖片]' }])
+  })
 })
 
 describe('facts injection', () => {
@@ -415,6 +516,7 @@ describe('facts injection', () => {
       recentMessages: [makeMessage({ userId: 'u1', content: 'Hi' })],
       config,
       db,
+      groupId: 'group-a',
       vectorStore: createFakeVectorStore(),
       deps,
     })
@@ -445,6 +547,7 @@ describe('facts injection', () => {
       recentMessages: [makeMessage({ userId: 'u1', content: 'Hi' })],
       config,
       db,
+      groupId: 'group-a',
       vectorStore: fakeVectorStore,
       deps,
     })
@@ -484,6 +587,7 @@ describe('facts injection', () => {
       recentMessages: [makeMessage({ userId: 'u1', content: 'Hi' })],
       config,
       db,
+      groupId: 'group-a',
       vectorStore: fakeVectorStore,
       deps,
     })
@@ -519,6 +623,7 @@ describe('facts injection', () => {
       recentMessages: [makeMessage({ userId: 'u1', content: 'Hi' })],
       config,
       db,
+      groupId: 'group-a',
       vectorStore: createFakeVectorStore(),
       deps,
     })

@@ -6,9 +6,9 @@
 
 ## 架構
 
-- **Per-group SQLite**：每個群組一個獨立 DB 檔案（`data/groups/{groupId}.db`），包含 messages、summaries、vectors
-- **GroupDbManager**：管理所有群組 DB 連線，lazy init + 快取
+- **Single unified SQLite**：所有群組資料存於同一 DB 檔案（`data/yamada.db`），以 `group_id` 欄位邏輯隔離
 - **Schema 初始化**：程式化 `CREATE TABLE IF NOT EXISTS`，不使用 Drizzle migration 檔案
+- **AppDb**：`AppDb = { db: DB, sqlite: Database }`，由 `openDb(dbPath, dimensions)` 建立
 - 架構文件詳見 `docs/memory.md`
 
 ## 訊息處理流程
@@ -40,7 +40,7 @@ HTTP Webhook（`Bun.serve`），接收 `POST /webhook/line`。
 兩平台匯合後走同一條路：
 
 1. `handleMessage()` 路由到 per-group Agent（lazy 建立）
-2. `Agent.receiveMessage()`：儲存訊息到 per-group DB + 記錄用戶活動統計（`user_stats`）
+2. `Agent.receiveMessage()`：儲存訊息到 DB（帶 `group_id`）+ 記錄用戶活動統計（`user_stats`）
 3. `upsertTrigger()`：寫入 `main.db` 的 `pending_triggers`（`isMention` sticky flag：同批次曾 mention 就保持）
 4. Scheduler 輪詢 `pending_triggers` → 靜默逾時 / 字元溢出 / @mention 條件成立時 claim
 5. 頻率控制器 `checkFrequency()`：

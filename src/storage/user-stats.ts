@@ -15,6 +15,7 @@ export type UserStatsAggregate = UserDailyStats
 /** UPSERT 累加當日 row：messageCount 永遠 +1，其他根據 flag */
 export function recordActivity(
   db: DB,
+  groupId: string,
   params: {
     userId: string
     date: string
@@ -27,6 +28,7 @@ export function recordActivity(
 
   db.insert(schema.userStats)
     .values({
+      groupId,
       userId,
       date,
       messageCount: 1,
@@ -35,7 +37,7 @@ export function recordActivity(
       mentionCount: isMention ? 1 : 0,
     })
     .onConflictDoUpdate({
-      target: [schema.userStats.userId, schema.userStats.date],
+      target: [schema.userStats.groupId, schema.userStats.userId, schema.userStats.date],
       set: {
         messageCount: sql`${schema.userStats.messageCount} + 1`,
         stickerCount: sql`${schema.userStats.stickerCount} + ${isSticker ? 1 : 0}`,
@@ -48,6 +50,7 @@ export function recordActivity(
 
 export function getUserDailyStats(
   db: DB,
+  groupId: string,
   userId: string,
   date: string,
 ): UserDailyStats | undefined {
@@ -60,7 +63,11 @@ export function getUserDailyStats(
     })
     .from(schema.userStats)
     .where(
-      and(eq(schema.userStats.userId, userId), eq(schema.userStats.date, date)),
+      and(
+        eq(schema.userStats.groupId, groupId),
+        eq(schema.userStats.userId, userId),
+        eq(schema.userStats.date, date),
+      ),
     )
     .get()
 
@@ -69,6 +76,7 @@ export function getUserDailyStats(
 
 export function getUserStatsSince(
   db: DB,
+  groupId: string,
   userId: string,
   sinceDate: string,
 ): UserStatsAggregate {
@@ -81,7 +89,11 @@ export function getUserStatsSince(
     })
     .from(schema.userStats)
     .where(
-      and(eq(schema.userStats.userId, userId), gte(schema.userStats.date, sinceDate)),
+      and(
+        eq(schema.userStats.groupId, groupId),
+        eq(schema.userStats.userId, userId),
+        gte(schema.userStats.date, sinceDate),
+      ),
     )
     .get()
 

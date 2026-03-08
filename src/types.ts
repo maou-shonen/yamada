@@ -15,6 +15,11 @@ export interface UnifiedMessage {
   isMention: boolean
   raw?: unknown
   replyToExternalId?: string
+  /**
+   * 圖片附件（由平台層提取，背景非同步處理）
+   * WHY: optional 因為絕大多數訊息無圖片；non-null entries 表示平台確認有圖片附件
+   */
+  images?: ImageAttachment[]
 }
 
 /** 平台通道介面（Discord / LINE 均需實作） */
@@ -56,6 +61,41 @@ export interface StoredChunk {
   messageIds: number[] // CRUD 레이어에서 JSON.parse됨
   startTimestamp: number
   endTimestamp: number
+}
+
+/**
+ * 平台圖片附件（UnifiedMessage 層）
+ * WHY: 解耦平台特定的圖片存取方式——Discord 提供直接 URL，LINE 需要呼叫 API
+ */
+export interface ImageAttachment {
+  /** Discord CDN 直接下載 URL；LINE 無此欄位 */
+  url?: string
+  /** LINE message ID，供 getMessageContent() API 使用；Discord 無此欄位 */
+  platformImageId?: string
+  /** MIME type（若平台提供），如 'image/jpeg', 'image/png' */
+  contentType?: string
+}
+
+/**
+ * DB 儲存的圖片格式
+ * CONSTRAINT: thumbnail 為 Uint8Array（SQLite BLOB 在 Bun 中的原生型別）
+ * WHY: 縮圖直接存 DB 確保 Litestream 備份覆蓋，不需額外檔案系統管理
+ *
+ * id: number — SQLite INTEGER PRIMARY KEY AUTOINCREMENT
+ * messageId: number — 外鍵 → messages.id
+ * thumbnail: 縮圖 BLOB（≤512px WebP）
+ * description: AI 生成的精簡描述（null 表示尚未生成）
+ */
+export interface StoredImage {
+  id: number
+  groupId: string
+  messageId: number
+  description: string | null
+  mimeType: string
+  width: number
+  height: number
+  createdAt: number
+  thumbnail: Uint8Array
 }
 
 /**

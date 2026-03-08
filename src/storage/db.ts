@@ -1,7 +1,6 @@
 import type { BunSQLiteDatabase } from 'drizzle-orm/bun-sqlite'
-import type { VectorStore } from './vector-store'
 import { existsSync, mkdirSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname } from 'node:path'
 import { Database } from 'bun:sqlite'
 import { drizzle } from 'drizzle-orm/bun-sqlite'
 import { log } from '../logger'
@@ -10,32 +9,33 @@ import { SqliteVectorStore } from './sqlite-vector-store'
 
 export type DB = BunSQLiteDatabase<typeof schema>
 
-export interface GroupDb {
+export interface AppDb {
   db: DB
   sqlite: Database
-  vectorStore: VectorStore
 }
 
 const dbLog = log.withPrefix('[DB]')
 
 /**
- * 開啟（或建立）指定群組的 SQLite DB。
- * 每次呼叫都回傳新的連線，由 GroupDbManager 負責快取。
+ * 開啟（或建立）SQLite DB 並初始化 schema + sqlite-vec 擴充。
+ *
+ * - 自動建立父目錄（若不存在）
+ * - 設定 WAL mode + busy_timeout = 10000ms
+ * - 程式化建立 schema（CREATE TABLE IF NOT EXISTS）
+ * - 載入 sqlite-vec 擴充（需傳入 dimensions）
+ *
+ * @param dbPath - DB 檔案路徑
+ * @param dimensions - 向量維度（供 sqlite-vec 初始化）
+ * @returns { db, sqlite }
  */
-const SAFE_GROUP_ID_REGEX = /^[\w-]+$/
-
-export function openGroupDb(dbDir: string, groupId: string, dimensions: number): GroupDb {
-  if (!SAFE_GROUP_ID_REGEX.test(groupId)) {
-    throw new Error(`Invalid groupId "${groupId}" — must contain only alphanumeric characters, underscores, and hyphens`)
+export function openDb(dbPath: string, dimensions: number): AppDb {
+  const dir = dirname(dbPath)
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true })
+    dbLog.withMetadata({ dir }).info('Created database directory')
   }
 
-  if (!existsSync(dbDir)) {
-    mkdirSync(dbDir, { recursive: true })
-    dbLog.withMetadata({ dbDir }).info('Created database directory')
-  }
-
-  const dbPath = join(dbDir, `${groupId}.db`)
-  dbLog.withMetadata({ dbPath }).info('Opening group SQLite database')
+  dbLog.withMetadata({ dbPath }).info('Opening SQLite database')
 
   let sqlite: Database
   try {
@@ -47,18 +47,34 @@ export function openGroupDb(dbDir: string, groupId: string, dimensions: number):
 
   // WAL mode 提升並發讀寫效能
   sqlite.exec('PRAGMA journal_mode = WAL')
-  // 防止 Observer/Embedding 背景任務與主 pipeline 發生 SQLITE_BUSY
-  sqlite.exec('PRAGMA busy_timeout = 5000')
+  // 統一使用 10000ms busy_timeout（原 main.db 使用此值）
+  sqlite.exec('PRAGMA busy_timeout = 10000')
 
   // 程式化建立 schema（不依賴 Drizzle migration 檔案）
   initSchema(sqlite)
 
   const db = drizzle(sqlite, { schema })
 
+  // 載入 sqlite-vec 擴充（註冊於此連線上，VectorStore 實例可之後獨立建立）
   const vectorStore = new SqliteVectorStore(sqlite)
   vectorStore.init(dimensions)
 
-  return { db, sqlite, vectorStore }
+  return { db, sqlite }
+}
+
+/**
+ * 關閉 DB 連線。
+ *
+ * 注意：不執行 WAL checkpoint — 由 Litestream 接管 WAL 管理。
+ */
+export function closeDb(appDb: AppDb): void {
+  try {
+    appDb.sqlite.close()
+    dbLog.info('Closed database')
+  }
+  catch (error) {
+    throw new Error('Failed to close database', { cause: error })
+  }
 }
 
 /**
@@ -69,60 +85,57 @@ export function initSchema(sqlite: Database): void {
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS messages (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      group_id TEXT NOT NULL,
       external_id TEXT,
       user_id TEXT NOT NULL,
       content TEXT NOT NULL,
       is_bot INTEGER NOT NULL DEFAULT 0,
-      timestamp INTEGER NOT NULL
+      timestamp INTEGER NOT NULL,
+      reply_to_external_id TEXT
     )
   `)
-  sqlite.exec(`
-    CREATE INDEX IF NOT EXISTS messages_timestamp_idx ON messages(timestamp)
-  `)
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS messages_timestamp_idx ON messages(group_id, timestamp)`)
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS messages_external_id_idx ON messages(group_id, external_id)`)
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS user_summaries (
       id TEXT PRIMARY KEY,
+      group_id TEXT NOT NULL,
       user_id TEXT NOT NULL,
       summary TEXT NOT NULL,
-      updated_at INTEGER NOT NULL,
-      UNIQUE(user_id)
+      updated_at INTEGER NOT NULL
     )
   `)
+  sqlite.exec(`CREATE UNIQUE INDEX IF NOT EXISTS user_summaries_user_unique ON user_summaries(group_id, user_id)`)
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS group_summaries (
-      id TEXT PRIMARY KEY,
+      group_id TEXT PRIMARY KEY,
       summary TEXT NOT NULL,
       updated_at INTEGER NOT NULL
     )
   `)
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS user_stats (
+      group_id TEXT NOT NULL,
       user_id TEXT NOT NULL,
       date TEXT NOT NULL,
       message_count INTEGER NOT NULL DEFAULT 0,
       sticker_count INTEGER NOT NULL DEFAULT 0,
       url_count INTEGER NOT NULL DEFAULT 0,
       mention_count INTEGER NOT NULL DEFAULT 0,
-      PRIMARY KEY (user_id, date)
+      PRIMARY KEY (group_id, user_id, date)
     )
   `)
-  sqlite.exec(`CREATE INDEX IF NOT EXISTS messages_external_id_idx ON messages(external_id)`)
-  try {
-    sqlite.exec(`ALTER TABLE messages ADD COLUMN reply_to_external_id TEXT`)
-  }
-  catch {
-    // 已存在時略過（相容舊有 DB）
-  }
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS chunks (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      group_id TEXT NOT NULL,
       content TEXT NOT NULL,
       message_ids TEXT NOT NULL,
       start_timestamp INTEGER NOT NULL,
       end_timestamp INTEGER NOT NULL
     )
   `)
-  sqlite.exec(`CREATE INDEX IF NOT EXISTS chunks_end_timestamp_idx ON chunks(end_timestamp)`)
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS chunks_end_timestamp_idx ON chunks(group_id, end_timestamp)`)
   // 移除舊的 message_vectors 虛擬表（已由 chunk_vectors 取代）
   // DROP TABLE IF EXISTS 對虛擬表同樣有效
   try {
@@ -146,7 +159,7 @@ export function initSchema(sqlite: Database): void {
   }
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS frequency_state (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      group_id TEXT PRIMARY KEY,
       ema_long_bot REAL NOT NULL DEFAULT 0,
       ema_long_total REAL NOT NULL DEFAULT 0,
       ema_short_bot REAL NOT NULL DEFAULT 0,
@@ -156,6 +169,7 @@ export function initSchema(sqlite: Database): void {
   `)
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS user_aliases (
+      group_id TEXT NOT NULL,
       user_id TEXT NOT NULL,
       alias TEXT NOT NULL,
       user_name TEXT NOT NULL,
@@ -163,10 +177,11 @@ export function initSchema(sqlite: Database): void {
       PRIMARY KEY (user_id, alias)
     )
   `)
-  sqlite.exec(`CREATE UNIQUE INDEX IF NOT EXISTS user_aliases_alias_unique ON user_aliases(alias)`)
+  sqlite.exec(`CREATE UNIQUE INDEX IF NOT EXISTS user_aliases_alias_unique ON user_aliases(group_id, alias)`)
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS facts (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      group_id TEXT NOT NULL,
       scope TEXT NOT NULL,
       user_id TEXT,
       canonical_key TEXT NOT NULL,
@@ -179,52 +194,41 @@ export function initSchema(sqlite: Database): void {
       updated_at INTEGER NOT NULL
     )
   `)
-  sqlite.exec(`CREATE UNIQUE INDEX IF NOT EXISTS facts_canonical_key_unique ON facts(canonical_key, scope, COALESCE(user_id, '')) WHERE status = 'active'`)
-  sqlite.exec(`CREATE INDEX IF NOT EXISTS facts_scope_user_status_idx ON facts(scope, user_id, status)`)
+  sqlite.exec(`CREATE UNIQUE INDEX IF NOT EXISTS facts_canonical_key_unique ON facts(group_id, canonical_key, scope, COALESCE(user_id, '')) WHERE status = 'active'`)
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS facts_scope_user_status_idx ON facts(group_id, scope, user_id, status)`)
   sqlite.exec(`
-    CREATE TABLE IF NOT EXISTS fact_metadata (
-      key TEXT PRIMARY KEY,
-      value INTEGER NOT NULL
+    CREATE TABLE IF NOT EXISTS images (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      group_id TEXT NOT NULL,
+      message_id INTEGER NOT NULL,
+      description TEXT,
+      mime_type TEXT NOT NULL DEFAULT 'image/webp',
+      width INTEGER NOT NULL,
+      height INTEGER NOT NULL,
+      created_at INTEGER NOT NULL,
+      thumbnail BLOB NOT NULL
     )
   `)
-}
-
-/**
- * 管理多個群組 DB 連線的快取。
- * 每個 groupId 對應一個 GroupDb 實例，lazy init。
- */
-export class GroupDbManager {
-  private readonly cache = new Map<string, GroupDb>()
-  private readonly dbDir: string
-  private readonly dimensions: number
-
-  constructor(dbDir: string, dimensions: number) {
-    this.dbDir = dbDir
-    this.dimensions = dimensions
-  }
-
-  /**
-   * 取得或建立指定群組的 DB 連線。
-   * 若已存在則直接回傳快取，否則呼叫 openGroupDb 建立新連線。
-   */
-  getOrCreate(groupId: string): GroupDb {
-    const existing = this.cache.get(groupId)
-    if (existing) {
-      return existing
-    }
-
-    const groupDb = openGroupDb(this.dbDir, groupId, this.dimensions)
-    this.cache.set(groupId, groupDb)
-    dbLog.withMetadata({ groupId }).info('Created new group DB')
-    return groupDb
-  }
-
-  /** Graceful shutdown：關閉所有已開啟的 DB 連線 */
-  closeAll(): void {
-    for (const [groupId, { sqlite }] of this.cache) {
-      sqlite.close()
-      dbLog.withMetadata({ groupId }).info('Closed group DB')
-    }
-    this.cache.clear()
-  }
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS images_message_idx ON images(group_id, message_id)`)
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS fact_metadata (
+      group_id TEXT NOT NULL,
+      key TEXT NOT NULL,
+      value INTEGER NOT NULL,
+      PRIMARY KEY (group_id, key)
+    )
+  `)
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS pending_triggers (
+      group_id TEXT PRIMARY KEY,
+      platform TEXT NOT NULL,
+      trigger_at INTEGER NOT NULL,
+      pending_chars INTEGER NOT NULL DEFAULT 0,
+      is_mention INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'pending',
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )
+  `)
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_triggers_status_trigger ON pending_triggers(status, trigger_at)`)
 }

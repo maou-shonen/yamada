@@ -3,8 +3,9 @@ import type { DB } from './db'
 import { and, count, desc, eq, gt } from 'drizzle-orm'
 import * as schema from './schema'
 
-export function saveMessage(db: DB, message: UnifiedMessage): void {
+export function saveMessage(db: DB, groupId: string, message: UnifiedMessage): void {
   db.insert(schema.messages).values({
+    groupId,
     externalId: message.id,
     userId: message.userId,
     content: message.content,
@@ -16,10 +17,12 @@ export function saveMessage(db: DB, message: UnifiedMessage): void {
 
 export function saveBotMessage(
   db: DB,
+  groupId: string,
   content: string,
   botUserId: string = 'bot',
 ): void {
   db.insert(schema.messages).values({
+    groupId,
     userId: botUserId,
     content,
     isBot: true,
@@ -29,11 +32,13 @@ export function saveBotMessage(
 
 export function getRecentMessages(
   db: DB,
+  groupId: string,
   limit: number,
 ): StoredMessage[] {
   return db
     .select()
     .from(schema.messages)
+    .where(eq(schema.messages.groupId, groupId))
     .orderBy(desc(schema.messages.timestamp))
     .limit(limit)
     .all()
@@ -41,25 +46,27 @@ export function getRecentMessages(
 
 export function getMessagesSince(
   db: DB,
+  groupId: string,
   since: Date,
 ): StoredMessage[] {
   return db
     .select()
     .from(schema.messages)
-    .where(gt(schema.messages.timestamp, since.getTime()))
+    .where(and(eq(schema.messages.groupId, groupId), gt(schema.messages.timestamp, since.getTime())))
     .orderBy(desc(schema.messages.timestamp))
     .all()
 }
 
 export function getMessagesByUser(
   db: DB,
+  groupId: string,
   userId: string,
   limit: number,
 ): StoredMessage[] {
   return db
     .select()
     .from(schema.messages)
-    .where(eq(schema.messages.userId, userId))
+    .where(and(eq(schema.messages.groupId, groupId), eq(schema.messages.userId, userId)))
     .orderBy(desc(schema.messages.timestamp))
     .limit(limit)
     .all()
@@ -71,6 +78,7 @@ export function getMessagesByUser(
  */
 export function getDistinctUserIds(
   db: DB,
+  groupId: string,
   since: number,
 ): string[] {
   const rows = db
@@ -78,6 +86,7 @@ export function getDistinctUserIds(
     .from(schema.messages)
     .where(
       and(
+        eq(schema.messages.groupId, groupId),
         gt(schema.messages.timestamp, since),
         eq(schema.messages.isBot, false),
       ),
@@ -87,10 +96,11 @@ export function getDistinctUserIds(
   return rows.map(r => r.userId)
 }
 
-export function getMessageCount(db: DB): number {
+export function getMessageCount(db: DB, groupId: string): number {
   const result = db
     .select({ count: count() })
     .from(schema.messages)
+    .where(eq(schema.messages.groupId, groupId))
     .get()
 
   return result?.count ?? 0

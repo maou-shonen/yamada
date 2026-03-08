@@ -56,6 +56,7 @@ function clamp(value: number, min: number, max: number): number {
 
 export function checkFrequency(
   db: DB,
+  groupId: string,
   config: Config,
   isMention: boolean,
   deps: Partial<FrequencyControllerDeps> = {},
@@ -102,10 +103,10 @@ export function checkFrequency(
   }
 
   const now = resolvedDeps.now()
-  const state = resolvedDeps.getFrequencyState(db)
+  const state = resolvedDeps.getFrequencyState(db, groupId)
 
   const since = now - (config.FREQUENCY_ACTIVE_WINDOW_DAYS * 24 * 60 * 60 * 1000)
-  const activeMembers = resolvedDeps.countActiveMembers(db, since)
+  const activeMembers = resolvedDeps.countActiveMembers(db, groupId, since)
   const target = calculateTarget(activeMembers, config.FREQUENCY_MIN_TARGET)
 
   // 一對一聊天（activeMembers <= 1）→ target = 1.0 → 無條件回覆

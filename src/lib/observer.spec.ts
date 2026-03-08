@@ -7,7 +7,7 @@ import { createTestConfig } from '../__tests__/helpers/config.ts'
 import { setupTestDb } from '../__tests__/helpers/setup-db'
 import { getDistinctUserIds, getMessagesByUser, getMessagesSince } from '../storage/messages'
 import { buildGroupCompressionPrompt } from '../prompts/observer'
-import { processNewFactEmbeddings } from '../storage/embedding'
+import { processNewFactEmbeddings } from './embedding'
 import {
   getAllActiveFacts,
   getFactWatermark,
@@ -68,8 +68,8 @@ function insertMessage(sqlite: Database, overrides: {
 } = {}) {
   const ts = overrides.timestamp ?? Date.now()
   sqlite.prepare(
-    `INSERT INTO messages(external_id, user_id, content, is_bot, timestamp)
-     VALUES(?, ?, ?, ?, ?)`,
+    `INSERT INTO messages(group_id, external_id, user_id, content, is_bot, timestamp)
+     VALUES('group-a', ?, ?, ?, ?, ?)`,
   ).run(
     overrides.externalId ?? null,
     overrides.userId ?? 'user1',
@@ -115,7 +115,7 @@ describe('shouldRun', () => {
     const config = makeConfig(5)
     insertMessage(sqlite, { content: 'm1' })
     insertMessage(sqlite, { content: 'm2' })
-    expect(shouldRun(db, config)).toBe(false)
+    expect(shouldRun(db, 'group-a', config)).toBe(false)
   })
 
   test('訊息數 >= threshold → true', () => {
@@ -124,7 +124,7 @@ describe('shouldRun', () => {
     insertMessage(sqlite, { content: 'm1' })
     insertMessage(sqlite, { content: 'm2' })
     insertMessage(sqlite, { content: 'm3' })
-    expect(shouldRun(db, config)).toBe(true)
+    expect(shouldRun(db, 'group-a', config)).toBe(true)
   })
 
   test('threshold 邊界：訊息數恰好 = threshold → true', () => {
@@ -135,7 +135,7 @@ describe('shouldRun', () => {
     insertMessage(sqlite, { content: 'm3' })
     insertMessage(sqlite, { content: 'm4' })
     insertMessage(sqlite, { content: 'm5' })
-    expect(shouldRun(db, config)).toBe(true)
+    expect(shouldRun(db, 'group-a', config)).toBe(true)
   })
 
   test('首次壓縮（無 group_summaries）：watermark=0，計算全部訊息', () => {
@@ -146,7 +146,7 @@ describe('shouldRun', () => {
     insertMessage(sqlite, { content: 'm2' })
     insertMessage(sqlite, { content: 'm3' })
     // 應該計算全部 3 則訊息 → shouldRun true
-    expect(shouldRun(db, config)).toBe(true)
+    expect(shouldRun(db, 'group-a', config)).toBe(true)
   })
 
   test('增量壓縮：只計算 watermark 之後的新訊息', () => {
@@ -159,13 +159,13 @@ describe('shouldRun', () => {
     // 插入 group summary，watermark = oldTs + 5000（在兩則舊訊息之後）
     const watermarkTs = oldTs + 5000
     sqlite.prepare(
-      `INSERT INTO group_summaries(id, summary, updated_at) VALUES(?, ?, ?)`,
-    ).run('gs1', 'Old summary', watermarkTs)
+      `INSERT INTO group_summaries(group_id, summary, updated_at) VALUES(?, ?, ?)`,
+    ).run('group-a', 'Old summary', watermarkTs)
     // 插入新訊息（在 watermark 之後）
     insertMessage(sqlite, { content: 'm3', timestamp: watermarkTs + 1 })
     insertMessage(sqlite, { content: 'm4', timestamp: watermarkTs + 2 })
     // 只有 2 則新訊息 >= threshold(2) → shouldRun true
-    expect(shouldRun(db, config)).toBe(true)
+    expect(shouldRun(db, 'group-a', config)).toBe(true)
   })
 
   test('壓縮後（group summary 存在且 updatedAt 夠新）→ false', async () => {
@@ -179,10 +179,10 @@ describe('shouldRun', () => {
     // 插入 group summary，updatedAt 比所有訊息新
     const nowTs = Date.now()
     sqlite.prepare(
-      `INSERT INTO group_summaries(id, summary, updated_at) VALUES(?, ?, ?)`,
-    ).run('gs1', 'Some summary', nowTs)
+      `INSERT INTO group_summaries(group_id, summary, updated_at) VALUES(?, ?, ?)`,
+    ).run('group-a', 'Some summary', nowTs)
     // 新訊息數 = 0（所有訊息都比 summary 舊）→ shouldRun false
-    expect(shouldRun(db, config)).toBe(false)
+    expect(shouldRun(db, 'group-a', config)).toBe(false)
   })
 })
 
@@ -193,10 +193,10 @@ describe('compressGroupSummary', () => {
     insertMessage(sqlite, { content: 'Hello world' })
     const { deps, generateCalls } = createFakeDeps('compressed group summary')
 
-    await compressGroupSummary(db, 0, config, deps)
+    await compressGroupSummary(db, 'group-a', 0, config, deps)
 
     expect(generateCalls.length).toBe(1)
-    const stored = await getGroupSummary(db)
+    const stored = getGroupSummary(db, 'group-a')
     expect(stored).toBe('compressed group summary')
   })
 
@@ -210,15 +210,15 @@ describe('compressGroupSummary', () => {
     // 插入 group summary，watermark = oldTs + 5000
     const watermarkTs = oldTs + 5000
     sqlite.prepare(
-      `INSERT INTO group_summaries(id, summary, updated_at) VALUES(?, ?, ?)`,
-    ).run('gs1', 'Old summary', watermarkTs)
+      `INSERT INTO group_summaries(group_id, summary, updated_at) VALUES(?, ?, ?)`,
+    ).run('group-a', 'Old summary', watermarkTs)
     // 插入新訊息（在 watermark 之後）
     insertMessage(sqlite, { userId: 'u1', content: 'new msg 1', timestamp: watermarkTs + 1 })
     insertMessage(sqlite, { userId: 'u1', content: 'new msg 2', timestamp: watermarkTs + 2 })
 
     const { deps, generateCalls } = createFakeDeps('incremental summary')
 
-    await compressGroupSummary(db, watermarkTs, config, deps)
+    await compressGroupSummary(db, 'group-a', watermarkTs, config, deps)
 
     // prompt 應包含新訊息但不含舊訊息
     expect(generateCalls.length).toBe(1)
@@ -243,10 +243,10 @@ describe('compressUserSummaries', () => {
       return `user summary ${callIndex}`
     }
 
-    await compressUserSummaries(db, 0, ['u1', 'u2'], config, deps)
+    await compressUserSummaries(db, 'group-a', 0, ['u1', 'u2'], config, deps)
 
-    const u1Summary = await getUserSummary(db, 'u1')
-    const u2Summary = await getUserSummary(db, 'u2')
+    const u1Summary = getUserSummary(db, 'group-a', 'u1')
+    const u2Summary = getUserSummary(db, 'group-a', 'u2')
     expect(u1Summary).toBe('user summary 1')
     expect(u2Summary).toBe('user summary 2')
     expect(callIndex).toBe(2)
@@ -263,7 +263,7 @@ describe('runObserver', () => {
     insertMessage(sqlite, { content: 'm1' })
     insertMessage(sqlite, { content: 'm2' })
 
-    await runObserver(db, vectorStore, config, deps)
+    await runObserver(db, 'group-a', vectorStore, config, deps)
 
     expect(generateCalls.length).toBe(0)
   })
@@ -280,14 +280,14 @@ describe('runObserver', () => {
     insertMessage(sqlite, { userId: 'u1', content: 'hello' })
     insertMessage(sqlite, { userId: 'u2', content: 'world' })
 
-    await runObserver(db, vectorStore, config, deps)
+    await runObserver(db, 'group-a', vectorStore, config, deps)
 
     // 3 次 LLM 呼叫：1 group summary + 2 user summaries
     expect(generateCalls.length).toBe(3)
-    const storedGroupSummary = await getGroupSummary(db)
+    const storedGroupSummary = getGroupSummary(db, 'group-a')
     expect(storedGroupSummary).toBe('fake summary')
-    const u1Summary = await getUserSummary(db, 'u1')
-    const u2Summary = await getUserSummary(db, 'u2')
+    const u1Summary = getUserSummary(db, 'group-a', 'u1')
+    const u2Summary = getUserSummary(db, 'group-a', 'u2')
     expect(u1Summary).toBe('fake summary')
     expect(u2Summary).toBe('fake summary')
   })
@@ -303,14 +303,14 @@ describe('runObserver', () => {
     insertMessage(sqlite, { userId: 'u1', isBot: false, content: 'user msg' })
     insertMessage(sqlite, { userId: 'bot', isBot: true, content: 'bot msg' })
 
-    await runObserver(db, vectorStore, config, deps)
+    await runObserver(db, 'group-a', vectorStore, config, deps)
 
     // 只有 u1 是非 bot，所以 2 次 LLM 呼叫：1 group + 1 user (u1)
     expect(generateCalls.length).toBe(2)
-    const u1Summary = await getUserSummary(db, 'u1')
+    const u1Summary = getUserSummary(db, 'group-a', 'u1')
     expect(u1Summary).toBe('fake summary')
     // bot 不應該有摘要
-    const botSummary = await getUserSummary(db, 'bot')
+    const botSummary = getUserSummary(db, 'group-a', 'bot')
     expect(botSummary).toBeNull()
   })
 
@@ -326,7 +326,7 @@ describe('runObserver', () => {
     insertMessage(sqlite, { userId: 'bot', isBot: true, content: 'bot msg 1' })
     insertMessage(sqlite, { userId: 'bot', isBot: true, content: 'bot msg 2' })
 
-    await runObserver(db, vectorStore, config, deps)
+    await runObserver(db, 'group-a', vectorStore, config, deps)
 
     // 只有 1 次 group summary LLM 呼叫，無 user summaries
     expect(generateCalls.length).toBe(1)
@@ -365,7 +365,7 @@ describe('fact extraction integration', () => {
     }
     const vectorStore = createFakeVectorStore()
 
-    await runObserver(db, vectorStore, config, testDeps)
+    await runObserver(db, 'group-a', vectorStore, config, testDeps)
 
     expect(upsertFactCalled).toBe(true)
     expect(setFactWatermarkCalled).toBe(true)
@@ -391,7 +391,7 @@ describe('fact extraction integration', () => {
     }
     const vectorStore = createFakeVectorStore()
 
-    await runObserver(db, vectorStore, config, testDeps)
+    await runObserver(db, 'group-a', vectorStore, config, testDeps)
 
     // extractFacts 拋錯 → try block 中的 setFactWatermark 不被呼叫
     expect(setFactWatermarkCalled).toBe(false)
