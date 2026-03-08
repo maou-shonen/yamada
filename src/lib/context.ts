@@ -403,7 +403,7 @@ export function buildChatMessages(
       let content = msg.content
       const storedImage = imageMap?.get(msg.id)
       if (storedImage?.description)
-        content = content.replace('[圖片]', `[圖片: ${storedImage.description}]`)
+        content = content.replace('[圖片]', `[圖片 #${storedImage.id}: ${storedImage.description}]`)
       userBuffer.push(`${displayId}: ${content}`)
     }
   }

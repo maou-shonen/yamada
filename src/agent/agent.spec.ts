@@ -76,6 +76,8 @@ function createFakeServices() {
   const runObserverMock = mock(async () => {})
   const processNewChunksMock = mock(async () => {})
   const recordActivityMock = mock(() => {})
+  const processImagesMock = mock(async () => {})
+  const downloadLineImageMock = mock(async () => Buffer.from('line-image'))
   const checkFrequencyMock = mock((...args: unknown[]) => {
     const isMention = args[3] === true
     return {
@@ -92,6 +94,8 @@ function createFakeServices() {
       },
     }
   })
+  const analyzeImageMock = mock(async () => '圖片分析結果')
+  const getImageByIdMock = mock(((): ReturnType<AgentServices['getImageById']> => null))
 
   const services: AgentServices = {
     saveMessage: saveMessageMock as unknown as AgentServices['saveMessage'],
@@ -105,8 +109,12 @@ function createFakeServices() {
     processNewChunks: processNewChunksMock as unknown as AgentServices['processNewChunks'],
     recordActivity: recordActivityMock as unknown as AgentServices['recordActivity'],
     checkFrequency: checkFrequencyMock as unknown as AgentServices['checkFrequency'],
+    analyzeImage: analyzeImageMock as unknown as AgentServices['analyzeImage'],
+    getImageById: getImageByIdMock as unknown as AgentServices['getImageById'],
     getOrCreateAlias: mock(async () => ({ alias: 'test_alias', userName: 'TestUser' })) as unknown as AgentServices['getOrCreateAlias'],
     getAliasMap: mock(async () => new Map()) as unknown as AgentServices['getAliasMap'],
+    processImages: processImagesMock as unknown as AgentServices['processImages'],
+    downloadLineImage: downloadLineImageMock as unknown as AgentServices['downloadLineImage'],
   }
 
   return {
@@ -122,7 +130,11 @@ function createFakeServices() {
       runObserverMock,
       processNewChunksMock,
       recordActivityMock,
+      processImagesMock,
+      downloadLineImageMock,
       checkFrequencyMock,
+      analyzeImageMock,
+      getImageByIdMock,
     },
   }
 }
@@ -268,6 +280,94 @@ describe('Agent', () => {
     expect(() => agent.receiveMessage(msg)).not.toThrow()
     // saveMessage 應該仍然被呼叫
     expect(mocks.saveMessageMock.mock.calls.length).toBe(1)
+  })
+
+  test('receiveMessage + images + visionEnabled=true → 觸發背景 processImages', async () => {
+    const { db } = setupTestDb()
+    const { services, mocks } = createFakeServices()
+    const agent = new Agent({
+      groupId: 'group1',
+      config: makeConfig({ visionEnabled: true }),
+      db,
+      vectorStore: createFakeVectorStore(),
+      channels: new Map(),
+      services,
+    })
+
+    const msg = makeMessage({
+      images: [{ url: 'https://cdn.example.com/test.jpg' }],
+    })
+
+    await agent.receiveMessage(msg)
+
+    expect(mocks.processImagesMock.mock.calls.length).toBe(1)
+    expect(mocks.processImagesMock).toHaveBeenCalledWith(
+      msg,
+      expect.anything(),
+      'group1',
+      expect.objectContaining({ visionEnabled: true }),
+    )
+  })
+
+  test('receiveMessage + images + visionEnabled=false → 不觸發 processImages', async () => {
+    const { db } = setupTestDb()
+    const { services, mocks } = createFakeServices()
+    const agent = new Agent({
+      groupId: 'group1',
+      config: makeConfig({ visionEnabled: false }),
+      db,
+      vectorStore: createFakeVectorStore(),
+      channels: new Map(),
+      services,
+    })
+
+    const msg = makeMessage({
+      images: [{ url: 'https://cdn.example.com/test.jpg' }],
+    })
+
+    await agent.receiveMessage(msg)
+
+    expect(mocks.processImagesMock.mock.calls.length).toBe(0)
+  })
+
+  test('receiveMessage 無 images 時不觸發 processImages', async () => {
+    const { db } = setupTestDb()
+    const { services, mocks } = createFakeServices()
+    const agent = new Agent({
+      groupId: 'group1',
+      config: makeConfig({ visionEnabled: true }),
+      db,
+      vectorStore: createFakeVectorStore(),
+      channels: new Map(),
+      services,
+    })
+
+    await agent.receiveMessage(makeMessage())
+
+    expect(mocks.processImagesMock.mock.calls.length).toBe(0)
+  })
+
+  test('receiveMessage 的 processImages 拋錯不會中斷主流程（fire-and-forget）', async () => {
+    const { db } = setupTestDb()
+    const { services, mocks } = createFakeServices()
+    mocks.processImagesMock.mockImplementation(async () => {
+      throw new Error('process images failed')
+    })
+
+    const agent = new Agent({
+      groupId: 'group1',
+      config: makeConfig({ visionEnabled: true }),
+      db,
+      vectorStore: createFakeVectorStore(),
+      channels: new Map(),
+      services,
+    })
+
+    const msg = makeMessage({ images: [{ url: 'https://cdn.example.com/test.jpg' }] })
+
+    await expect(agent.receiveMessage(msg)).resolves.toBeUndefined()
+    expect(mocks.saveMessageMock.mock.calls.length).toBe(1)
+    expect(mocks.recordActivityMock.mock.calls.length).toBe(1)
   })
 
   test('processTriggeredMessages → 完整 pipeline: assembleContext + generateReply + deliverReply + saveBotMessage', async () => {
@@ -479,6 +579,71 @@ describe('Agent', () => {
     expect(mocks.deliverReactionMock.mock.calls.length).toBe(1)
     expect(mocks.deliverReplyMock.mock.calls.length).toBe(1)
     expect(mocks.saveBotMessageMock.mock.calls.length).toBe(1)
+  })
+
+  test('viewImage action → analyzeImage 後回覆分析結果', async () => {
+    const { sqlite, db } = setupTestDb()
+    const { services, mocks } = createFakeServices()
+    mocks.generateReplyMock.mockImplementation(async () => ({
+      actions: [{ type: 'viewImage' as const, imageId: 5, question: '圖裡有什麼？' }],
+      usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+    }))
+    mocks.getImageByIdMock.mockImplementation(() => ({
+      id: 5,
+      groupId: 'group1',
+      messageId: 1,
+      description: 'A cat',
+      mimeType: 'image/webp',
+      width: 256,
+      height: 256,
+      createdAt: Date.now(),
+      thumbnail: new Uint8Array([1, 2, 3]),
+    }))
+    mocks.analyzeImageMock.mockImplementation(async () => '這是一隻坐在窗邊的貓。')
+
+    const channel = makeChannel()
+    const agent = new Agent({
+      groupId: 'group1',
+      config: makeConfig(),
+      db,
+      vectorStore: createFakeVectorStore(),
+      channels: new Map([['discord', channel]]),
+      services,
+    })
+
+    await agent.processTriggeredMessages('discord', false)
+
+    expect(mocks.getImageByIdMock).toHaveBeenCalledWith(expect.anything(), 5)
+    expect(mocks.analyzeImageMock).toHaveBeenCalledWith(expect.any(Buffer), '圖裡有什麼？', expect.anything())
+    expect(mocks.deliverReplyMock).toHaveBeenCalledWith(
+      expect.objectContaining({ content: '這是一隻坐在窗邊的貓。', platform: 'discord' }),
+    )
+    expect(mocks.saveBotMessageMock.mock.calls.length).toBe(0)
+  })
+
+  test('viewImage 找不到圖片時不崩潰且不呼叫 analyzeImage', async () => {
+    const { sqlite, db } = setupTestDb()
+    const { services, mocks } = createFakeServices()
+    mocks.generateReplyMock.mockImplementation(async () => ({
+      actions: [{ type: 'viewImage' as const, imageId: 999 }],
+      usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+    }))
+    mocks.getImageByIdMock.mockImplementation(() => null)
+
+    const agent = new Agent({
+      groupId: 'group1',
+      config: makeConfig(),
+      db,
+      vectorStore: createFakeVectorStore(),
+      channels: new Map([['discord', makeChannel()]]),
+      services,
+    })
+
+    await agent.processTriggeredMessages('discord', false)
+
+    expect(mocks.getImageByIdMock).toHaveBeenCalledWith(expect.anything(), 999)
+    expect(mocks.analyzeImageMock.mock.calls.length).toBe(0)
+    expect(mocks.deliverReplyMock.mock.calls.length).toBe(0)
   })
 
   test('Observer 和 Embedding 是 fire-and-forget（不阻塞回覆）', async () => {

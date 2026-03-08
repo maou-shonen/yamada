@@ -83,6 +83,8 @@ function createTestServices(overrides: Partial<AgentServices> = {}) {
     processNewChunks: (mock(async () => {}) as unknown) as AgentServices['processNewChunks'],
     recordActivity: (mock(() => {}) as unknown) as AgentServices['recordActivity'],
     checkFrequency: checkFrequencyMock as unknown as AgentServices['checkFrequency'],
+    analyzeImage: (mock(async () => 'mock image analysis') as unknown) as AgentServices['analyzeImage'],
+    getImageById: (mock(() => null) as unknown) as AgentServices['getImageById'],
     getOrCreateAlias: (mock(async () => ({ alias: 'test_alias', userName: 'TestUser' })) as unknown) as AgentServices['getOrCreateAlias'],
     getAliasMap: (mock(async () => new Map()) as unknown) as AgentServices['getAliasMap'],
     ...overrides,

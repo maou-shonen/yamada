@@ -118,6 +118,8 @@ function createChainServices(overrides: Partial<AgentServices> = {}): AgentServi
         reason: 'pass',
       },
     })) as unknown) as AgentServices['checkFrequency'],
+    analyzeImage: (mock(async () => 'mock image analysis') as unknown) as AgentServices['analyzeImage'],
+    getImageById: (mock(() => null) as unknown) as AgentServices['getImageById'],
     // No-op 背景任務
     runObserver: (mock(async () => {}) as unknown) as AgentServices['runObserver'],
     processNewChunks: (mock(async () => {}) as unknown) as AgentServices['processNewChunks'],
