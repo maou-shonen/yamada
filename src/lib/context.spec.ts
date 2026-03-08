@@ -391,7 +391,7 @@ describe('assembleContext', () => {
 
     expect(receivedGroupId).toBe('group-a')
     expect(receivedMessageIds).toEqual([42])
-    expect(messages.find(message => message.role === 'user')?.content).toBe('u1: 看看這個 [圖片: A cat]')
+    expect(messages.find(message => message.role === 'user')?.content).toBe('u1: 看看這個 [圖片 #1: A cat]')
   })
 })
 
@@ -445,7 +445,7 @@ describe('buildChatMessages', () => {
 
     const result = buildChatMessages([msg], new Map(), imageMap)
 
-    expect(result).toEqual([{ role: 'user', content: 'u1: [圖片: A cat]' }])
+    expect(result).toEqual([{ role: 'user', content: 'u1: [圖片 #1: A cat]' }])
   })
 
   test('圖片描述尚未生成時保留 [圖片]', () => {
@@ -463,7 +463,7 @@ describe('buildChatMessages', () => {
 
     const result = buildChatMessages([msg], new Map(), imageMap)
 
-    expect(result).toEqual([{ role: 'user', content: 'u1: 看看這個 [圖片: A cat]' }])
+    expect(result).toEqual([{ role: 'user', content: 'u1: 看看這個 [圖片 #1: A cat]' }])
   })
 
   test('未提供 imageMap 時維持原本格式', () => {
