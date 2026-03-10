@@ -5,7 +5,7 @@
 ## 特色
 
 - **Debounce 回覆** — 等大家說完才回，不會逐句搶話。靜默觸發、溢出觸發、@mention 急迫模式
-- **長期記憶** — 背景壓縮對話為使用者/群組摘要 + 語義搜尋歷史訊息
+- **長期記憶** — 背景壓縮對話為摘要 + 萃取穩定事實（Facts） + 語義搜尋歷史訊息
 - **Per-group 隔離** — 訊息、摘要、向量搜尋完全按群組隔離
 - **雙平台** — Discord + LINE，統一訊息格式
 
@@ -16,12 +16,14 @@ graph TD
     D[Discord<br/>WebSocket 長連線] -->|UnifiedMessage| Agent[群組 Agent<br/>per-group 隔離]
     L[LINE<br/>Webhook HTTP] -->|UnifiedMessage| Agent
 
-    Agent --> When{何時回覆?<br/>debounce · 頻率控制}
-    When -->|觸發| What[上下文組裝 → AI 生成]
+    Agent --> When{何時回覆?<br/>debounce}
+    When -->|觸發| Freq{頻率控制}
+    Freq -->|通過| What[上下文組裝 → AI 生成]
+    Freq -.->|跳過| Skip([節省 tokens])
     What --> Reply[回覆投遞]
     Reply --> D & L
 
-    What <-.->|查詢| Mem[(長期記憶<br/>摘要 · 語義搜尋)]
+    What <-.->|查詢| Mem[(長期記憶<br/>摘要 · Facts · 語義搜尋)]
     Agent -.->|背景更新| Mem
 ```
 
@@ -29,10 +31,11 @@ graph TD
 
 1. **平台接入** — Discord / LINE 各自處理平台特有邏輯（連線、內容解析、mention 判定），轉為統一訊息格式
 2. **群組路由** — 過濾 bot 訊息與 DM，路由到對應群組的 Agent（per-group 隔離）
-3. **時機判斷** — Debounce 等大家說完再回；頻率控制避免刷屏
-4. **上下文組裝** — 人格 + 記憶摘要 + 語義搜尋 + 近期訊息，控制 token 預算
-5. **AI 生成回覆** — 可回覆、反應、或靜默跳過
-6. **背景記憶** — 持續壓縮舊對話為摘要，建立語義索引供未來查詢
+3. **時機判斷** — Debounce 等大家說完再回（靜默逾時 / 字元溢出 / @mention 急迫模式）
+4. **頻率控制** — 基於 bot 發言佔比 vs 公平份額計算回應機率，避免刷屏；@mention 無條件通過
+5. **上下文組裝** — 人格 + 群組/用戶摘要 + Facts（耐久知識） + 語義搜尋 + 近期訊息，控制 token 預算
+6. **AI 生成回覆** — 可回覆、反應、或靜默跳過
+7. **背景記憶** — 壓縮對話為摘要、萃取 Facts（穩定事實）、chunk-based embedding 建立語義索引
 
 ## 快速開始
 

@@ -36,7 +36,7 @@ export interface PlatformChannel {
  * DB 儲存的訊息格式
  * CONSTRAINT: timestamp 為 number 而非 Date
  * WHY: SQLite 原生儲存整數；在邊界層轉換保持 DB 層簡潔，避免序列化/反序列化開銷
- * NOTE: groupId 已移除——per-group DB 本身就是隔離單位，不需要 group_id 欄位
+ * NOTE: groupId 不包含在此介面中——查詢時已透過 WHERE group_id 條件隔離，回傳結果無需重複攜帶
  *
  * id: number — SQLite INTEGER PRIMARY KEY AUTOINCREMENT，也是向量索引的 rowid
  * externalId: string | null — 平台訊息 ID（Discord snowflake / LINE message ID），bot 訊息為 null
@@ -52,8 +52,8 @@ export interface StoredMessage {
 }
 
 /**
- * DB에 저장된 chunk 형식
- * messageIds: JSON parse된 배열 (chunks.ts CRUD 레이어에서 변환)
+ * DB 儲存的 chunk 格式
+ * messageIds: JSON parse 後的陣列（由 chunks.ts CRUD 層轉換）
  */
 export interface StoredChunk {
   id: number

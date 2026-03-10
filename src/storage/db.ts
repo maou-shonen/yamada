@@ -26,7 +26,7 @@ const dbLog = log.withPrefix('[DB]')
  *
  * @param dbPath - DB 檔案路徑
  * @param dimensions - 向量維度（供 sqlite-vec 初始化）
- * @returns { db, sqlite }
+ * @returns 包含 Drizzle ORM 實例（db）與原生 SQLite 連線（sqlite）的 AppDb 物件
  */
 export function openDb(dbPath: string, dimensions: number): AppDb {
   const dir = dirname(dbPath)
