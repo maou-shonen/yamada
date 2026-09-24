@@ -16,7 +16,7 @@
     "@loglayer/transport-simple-pretty-terminal": "^3.0.2",
     "@sqliteai/sqlite-vector": "^0.9.92",
     "ai": "^6.0.90",
-    "ai-sdk-provider-env": "^0.2.0",
+    "ai-sdk-provider-env": "^0.5.0",
     "discord.js": "^14.25.1",
     "drizzle-orm": "^0.45.1",
     "loglayer": "^9.1.0",
