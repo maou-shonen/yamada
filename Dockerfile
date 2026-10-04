@@ -6,7 +6,7 @@ COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile --production
 
 # ── 階段 2：Litestream binary ──
-FROM litestream/litestream:0.3.13 AS litestream
+FROM litestream/litestream:0.5.17 AS litestream
 
 # ── 階段 3：執行環境 ──
 FROM oven/bun:1-slim
