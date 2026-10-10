@@ -11,7 +11,7 @@
     "@ai-sdk/google": "^3.0.33",
     "@ai-sdk/openai": "^3.0.29",
     "@ai-sdk/openai-compatible": "^2.0.35",
-    "@line/bot-sdk": "^10.6.0",
+    "@line/bot-sdk": "^11.0.0",
     "@loglayer/transport-log-file-rotation": "^3.0.2",
     "@loglayer/transport-simple-pretty-terminal": "^3.0.2",
     "@sqliteai/sqlite-vector": "^0.9.92",
