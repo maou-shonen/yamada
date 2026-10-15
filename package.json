@@ -31,6 +31,6 @@
     "drizzle-kit": "^0.31.9",
     "eslint": "^9.39.2",
     "eslint-plugin-format": "^1.4.0",
-    "portless": "^0.4.2"
+    "portless": "^0.15.0"
   }
 }
